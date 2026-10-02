@@ -511,7 +511,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v29";
+  const BUILD_VERSION = "v30";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -600,7 +600,10 @@
       color: "#9a9a9a",
     });
     const title = document.createElement("span");
-    title.textContent = `voice debug · ${BUILD_VERSION}`;
+    // Read directly (not RESUME_TEST, which is declared further down and not
+    // yet initialized when the panel is built at page load).
+    const resumeTestOn = new URLSearchParams(location.search).has("resumetest");
+    title.textContent = `voice debug · ${BUILD_VERSION}${resumeTestOn ? " · resume test" : ""}`;
     header.appendChild(title);
 
     voiceDebugCopyBtn = document.createElement("button");
