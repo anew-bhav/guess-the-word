@@ -264,8 +264,7 @@
     el.guessInput.disabled = false;
     el.guessInput.value = "";
     el.guessInput.maxLength = activeSecondWord.length;
-    if (typingFallbackActive && voiceHeardThisSession) hideTypingFallback();
-    if (!arModeActive || typingFallbackActive) el.guessInput.focus();
+    if (!arModeActive) el.guessInput.focus();
 
     if (showNewChainMessage) showChainToast();
   }
@@ -290,6 +289,7 @@
 
   function showChainToast() {
     clearTimeout(toastTimer);
+    el.chainToast.textContent = "New chain!";
     el.chainToast.classList.add("show");
     announce("New chain! " + activeSecondWord.charAt(0).toUpperCase() + " blank.");
     toastTimer = setTimeout(() => el.chainToast.classList.remove("show"), CHAIN_TOAST_MS);
@@ -478,10 +478,9 @@
   // After "Tap to resume", the timer stays paused until the microphone
   // actually hears something — see beginResumeSpeechCheck().
   let pausedAwaitingSpeech = false;
-  // Typing fallback inside AR mode — see showTypingFallback().
+  // Switching to typing when the microphone goes silent — see switchToTypingMode().
   let voiceSilenceTimer = null;
   let voiceHeardThisSession = false;
-  let typingFallbackActive = false;
 
   // Voice input (AR mode only — see voice.js). In AR mode the player can
   // only speak their answer, never type it — activateArMode()/
@@ -508,7 +507,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v22";
+  const BUILD_VERSION = "v23";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -930,8 +929,7 @@
     el.gameScreen.classList.add("ar-active");
     el.arLayer.classList.remove("hidden");
     el.wordCard.classList.add("ar-tracked");
-    el.guessForm.classList.add("hidden"); // AR mode: speak the answer (typing only as a fallback — see showTypingFallback())
-    typingFallbackActive = false;
+    el.guessForm.classList.add("hidden"); // AR mode: speak the answer (see switchToTypingMode() for when the mic fails)
     voiceHeardThisSession = false;
 
     el.modelLoadProgress.classList.add("hidden");
@@ -1003,7 +1001,6 @@
     el.moveIntoFrameHint.classList.add("hidden");
     el.modelLoadProgress.classList.add("hidden");
     el.guessForm.classList.remove("hidden"); // restore typing for non-AR play
-    typingFallbackActive = false;
     voiceHeardThisSession = false;
     nextSilenceCheckMs = SILENCE_NEW_SESSION_MS;
     el.resumeBtn.classList.add("hidden");
@@ -1074,12 +1071,12 @@
     return true;
   }
 
-  // One hint pill, three messages: waiting on the microphone itself takes
+  // One hint pill, two messages: waiting on the microphone itself takes
   // priority over waiting for the player's first words after a resume.
   // Also owns the mic retry button: shown whenever voice is the live input,
   // hidden while the player is away or the resume button is up.
   function refreshVoiceHint() {
-    el.micRetryBtn.classList.toggle("hidden", !(voiceActive && arModeActive && !pausedByTabHidden && !typingFallbackActive));
+    el.micRetryBtn.classList.toggle("hidden", !(voiceActive && arModeActive && !pausedByTabHidden));
     const hint = el.voiceReconnectingHint;
     const hintAllowed = arModeActive && !pausedByTabHidden;
     if (hintAllowed && pausedByVoiceNotListening) {
@@ -1087,9 +1084,6 @@
       hint.classList.remove("hidden");
     } else if (hintAllowed && pausedAwaitingSpeech) {
       hint.textContent = "Say your answer to continue";
-      hint.classList.remove("hidden");
-    } else if (hintAllowed && typingFallbackActive && !voiceHeardThisSession) {
-      hint.textContent = "Mic not responding — type your answer";
       hint.classList.remove("hidden");
     } else {
       hint.classList.add("hidden");
@@ -1103,17 +1097,15 @@
   // ordering, restart gaps, keeping the session alive, a getUserMedia
   // microphone warm-up) failed on a real iPhone. A silent session can't be
   // detected directly — only by hearing nothing — so: if a microphone
-  // session hears nothing within a short window, the typing bar comes back
-  // and the player can keep playing by typing. The microphone is left
-  // alone (no restart loop) so iOS can recover it; once it hears the player
-  // again, the next round goes back to voice-only.
+  // session hears nothing within a short window, the game leaves camera
+  // mode and continues in typing mode (switchToTypingMode()).
   //
   // Windows: after a resume or a mic retry tap the player is about to
   // speak, so 3s (the timer is frozen meanwhile); for any other new
-  // session, including game start, 8s (the timer runs, since the player may
-  // just be thinking — the typing bar is only offered, not forced).
+  // session, including game start, 8s (the timer runs meanwhile).
   const SILENCE_AFTER_RESUME_MS = 3000;
   const SILENCE_NEW_SESSION_MS = 8000;
+  const SWITCH_TO_TYPING_TOAST_MS = 3500;
   let nextSilenceCheckMs = SILENCE_NEW_SESSION_MS;
 
   function beginResumeSpeechCheck() {
@@ -1137,11 +1129,7 @@
   function handleVoiceSilence() {
     voiceSilenceTimer = null;
     if (!voiceActive || !arModeActive || pausedByTabHidden || voiceHeardThisSession) return;
-    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ nothing heard — switching to typing`);
-    pausedAwaitingSpeech = false;
-    showTypingFallback();
-    refreshVoiceHint();
-    updatePauseState();
+    switchToTypingMode();
   }
 
   // Any interim or final transcript: this session can hear the player.
@@ -1156,19 +1144,22 @@
     refreshVoiceHint();
   }
 
-  function showTypingFallback() {
-    if (typingFallbackActive) return;
-    typingFallbackActive = true;
-    el.guessForm.classList.remove("hidden");
-    announce("Microphone isn't responding. Type your answer.");
-  }
-
-  function hideTypingFallback() {
-    if (!typingFallbackActive) return;
-    typingFallbackActive = false;
-    el.guessForm.classList.add("hidden");
-    el.guessInput.blur(); // closes the on-screen keyboard
-    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ microphone back — voice only again`);
+  // Leaves camera mode for the rest of this game and continues it in the
+  // regular typing layout (camera and microphone off, centered card,
+  // typing bar) — the same path a camera failure mid-game already takes.
+  // A first version kept the camera view and just added the typing bar on
+  // top, which didn't read as a switch at all. The saved camera
+  // preference is untouched, so the next game starts in camera mode again.
+  function switchToTypingMode() {
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ nothing heard — switching to typing mode`);
+    deactivateArMode(); // also clears every AR pause reason
+    updatePauseState();
+    clearTimeout(toastTimer);
+    el.chainToast.textContent = "Mic not responding — type instead";
+    el.chainToast.classList.add("show");
+    toastTimer = setTimeout(() => el.chainToast.classList.remove("show"), SWITCH_TO_TYPING_TOAST_MS);
+    announce("Microphone isn't responding. Switched to typing.");
+    el.guessInput.focus();
   }
 
   el.micRetryBtn.addEventListener("click", () => {
@@ -1364,7 +1355,7 @@
     // connecting word and the complete term on its own.
     const heardSoFar = pendingVoiceParts.join("");
     const slotGuess = extractConnectingWordGuess(heardSoFar, activeTerm && activeTerm.first);
-    if (!typingFallbackActive) buildSlots(activeSecondWord, slotGuess); // don't overwrite letters the player is typing
+    buildSlots(activeSecondWord, slotGuess);
 
     // Test this fragment alone first, before waiting on the debounce at
     // all. The connecting word the player needs to say is almost always a
@@ -1379,10 +1370,6 @@
     voiceSubmitTimer = setTimeout(() => {
       const combined = pendingVoiceParts.join("");
       pendingVoiceParts = [];
-      // While typing is the fallback, voice can still answer correctly
-      // (above) but a non-matching voice result never costs a try or
-      // replaces what the player has typed.
-      if (typingFallbackActive) return;
       el.guessInput.value = combined;
       submitCurrentGuess();
     }, VOICE_SUBMIT_DEBOUNCE_MS);
@@ -1417,7 +1404,7 @@
     const matched = findAcceptedVoiceGuess([preview]);
     if (matched) interimMatchedGuess = matched; // kept until this utterance's final result — see handleVoiceResult()
     const slotGuess = extractConnectingWordGuess(preview, activeTerm && activeTerm.first);
-    if (!typingFallbackActive) buildSlots(activeSecondWord, slotGuess); // don't overwrite letters the player is typing
+    buildSlots(activeSecondWord, slotGuess);
   }
 
   function handleVoiceError(error) {
