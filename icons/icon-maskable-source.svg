@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable: background fills edge-to-edge (the OS applies its own
+       rounding/circle mask), and the glyph stays within the safe-zone
+       (roughly the inner 80%) so it isn't clipped. -->
+  <rect width="512" height="512" fill="#2d6cdf"/>
+  <g fill="none" stroke="#ffffff" stroke-width="28" stroke-linecap="round">
+    <rect x="158" y="196" width="120" height="80" rx="40"/>
+    <rect x="234" y="246" width="120" height="80" rx="40"/>
+  </g>
+</svg>

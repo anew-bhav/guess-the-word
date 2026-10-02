@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#2d6cdf" />
+  <title>Design Chain</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <!-- iOS Safari doesn't fully rely on manifest.json for "Add to Home
+       Screen" — these are the Apple-specific equivalents that make it
+       launch standalone (no Safari address bar) with the right name,
+       which matters most here since an offline demo on an iPhone is the
+       actual priority use case. -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Design Chain" />
+  <!-- Resolves light/dark before the stylesheet paints, so the right palette
+       shows immediately with no flash. Saved explicit choice wins; otherwise
+       falls back to the system preference. ui.js keeps this in sync after. -->
+  <script>
+    (function () {
+      var theme = "light";
+      try {
+        var saved = localStorage.getItem("designChainTheme");
+        if (saved === "light" || saved === "dark") {
+          theme = saved;
+        } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+          theme = "dark";
+        }
+      } catch (e) {}
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Always visible above either screen, so the theme toggle has one
+       consistent, never-overlapping home regardless of what's showing. -->
+  <header class="app-bar">
+    <span class="app-bar-left">
+      <span class="app-bar-title">Design Chain</span>
+      <span id="offline-badge" class="offline-badge hidden" role="status">Offline — you can still play</span>
+    </span>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light theme">🌙</button>
+  </header>
+
+  <!-- ================= GAME SCREEN (also the first screen the player sees) ================= -->
+  <section id="game-screen" class="screen" aria-labelledby="game-title">
+    <h1 id="game-title" class="sr-only">Design Chain</h1>
+
+    <!-- AR layer: camera feed + detected-face box. Hidden entirely outside
+         AR mode; see the .ar-active modifier on #game-screen in styles.css. -->
+    <div id="ar-layer" class="ar-layer hidden" aria-hidden="true">
+      <video id="camera-video" class="camera-video" playsinline muted></video>
+      <p id="move-into-frame-hint" class="move-into-frame hidden">Move into frame</p>
+      <p id="voice-reconnecting-hint" class="move-into-frame voice-reconnecting hidden" role="status">Reconnecting microphone…</p>
+      <p id="model-load-progress" class="model-load-progress hidden" role="status"></p>
+    </div>
+
+    <!-- HUD: timer + score stacked on the left, tries (lives) on the right.
+         Same markup is shared by both the normal and AR screens. -->
+    <header class="hud">
+      <div class="hud-left">
+        <div class="hud-item hud-timer">
+          <svg class="timer-ring" viewBox="0 0 60 60" aria-hidden="true">
+            <circle class="timer-ring-bg" cx="30" cy="30" r="26"></circle>
+            <circle id="timer-ring-progress" class="timer-ring-progress" cx="30" cy="30" r="26"></circle>
+          </svg>
+          <span id="timer-value" class="timer-value">30</span>
+        </div>
+        <div class="hud-item hud-score">
+          <span class="hud-label">Layers</span>
+          <span id="score-value" class="hud-value">0</span>
+        </div>
+      </div>
+      <div class="hud-item hud-tries" id="tries-indicator" aria-label="Tries remaining">
+        <span class="try-swatch" data-try="1"></span>
+        <span class="try-swatch" data-try="2"></span>
+        <span class="try-swatch" data-try="3"></span>
+      </div>
+    </header>
+
+    <!-- Board -->
+    <main class="board">
+      <!-- Start panel: sits where the word card goes, so the first thing shown is this
+           game screen itself, not a separate landing page. -->
+      <div id="start-panel" class="word-card start-panel">
+        <h2 class="logo">Design Chain</h2>
+        <p class="tagline">Guess the connecting word to build a chain of real design terms.</p>
+
+        <div class="example" aria-hidden="true">
+          <span class="example-word">WIRE</span>
+          <span class="example-plus">+</span>
+          <span class="example-word example-guess">FRAME</span>
+          <span class="example-arrow">&rarr;</span>
+          <span class="example-result">WIREFRAME</span>
+        </div>
+
+        <div class="best-score">
+          Best score: <strong id="best-score-value">0</strong>
+        </div>
+
+        <p id="offline-ready-status" class="offline-ready-status hidden" role="status"></p>
+
+        <label class="camera-toggle">
+          <input type="checkbox" id="camera-toggle-input" />
+          <span>Play in camera mode (AR)</span>
+        </label>
+        <p class="camera-privacy-note">Video is processed only on your device and is never uploaded.</p>
+
+        <button id="play-btn" class="btn btn-primary" type="button">Play</button>
+      </div>
+
+      <!-- Shown briefly while the camera/face model are starting, or as a
+           friendly fallback if camera mode fails for any reason. -->
+      <div id="camera-status-panel" class="word-card camera-status-panel hidden">
+        <p id="camera-status-message" class="camera-status-message">Starting camera…</p>
+        <button id="play-without-camera-btn" class="btn btn-secondary hidden" type="button">Play without camera</button>
+      </div>
+
+      <div id="word-card" class="word-card hidden">
+        <span class="handle handle-tl" aria-hidden="true"></span>
+        <span class="handle handle-tr" aria-hidden="true"></span>
+        <span class="handle handle-bl" aria-hidden="true"></span>
+        <span class="handle handle-br" aria-hidden="true"></span>
+        <span id="chain-toast" class="chain-toast" aria-hidden="true">New chain!</span>
+        <button id="hint-btn" class="hint-btn hidden" type="button" aria-label="Show hint">i</button>
+        <div class="card-main-word" id="main-word"></div>
+        <div class="card-slots" id="guess-slots" aria-hidden="true"></div>
+        <div class="card-merged" id="card-merged" aria-hidden="true"></div>
+        <p id="hint-text" class="hint-text hidden"></p>
+      </div>
+
+      <p id="live-region" class="sr-only" role="status" aria-live="polite"></p>
+    </main>
+
+    <!-- Input bar -->
+    <form id="guess-form" class="input-bar hidden" autocomplete="off">
+      <input
+        id="guess-input"
+        class="guess-input"
+        type="text"
+        inputmode="text"
+        autocapitalize="characters"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        aria-label="Type the connecting word"
+        placeholder="Type your guess…"
+      />
+    </form>
+  </section>
+
+  <!-- ================= GAME OVER SCREEN ================= -->
+  <section id="gameover-screen" class="screen hidden" aria-labelledby="gameover-title">
+    <div class="gameover-wrap">
+      <span class="export-tag" aria-hidden="true">design-chain__export.png</span>
+      <header class="gameover-header">
+        <h1 id="gameover-title">Game Over</h1>
+
+        <div class="score-hero">
+          <span id="new-best-badge" class="new-best-badge hidden">New best</span>
+          <span id="final-score" class="score-hero-value">0</span>
+          <span class="score-hero-label">points</span>
+        </div>
+        <p class="best-score-line">Best score: <strong id="final-best">0</strong></p>
+
+        <div class="gameover-actions">
+          <button id="play-again-btn" class="btn btn-primary" type="button">
+            <span class="btn-icon" aria-hidden="true">&#8635;</span> Play again
+          </button>
+          <button id="copy-result-btn" class="btn btn-secondary" type="button">
+            <span class="btn-icon" aria-hidden="true">&#10697;</span> Copy result
+          </button>
+        </div>
+        <p id="copy-confirm" class="copy-confirm" role="status" aria-live="polite"></p>
+      </header>
+
+      <div class="terms-heading">
+        <h2>Your chain</h2>
+        <span id="terms-count" class="terms-count">0 terms</span>
+      </div>
+      <ul id="terms-list" class="terms-list"></ul>
+    </div>
+  </section>
+
+  <script src="design-terms.js"></script>
+  <script src="game.js"></script>
+  <script src="face.js"></script>
+  <script src="voice.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>

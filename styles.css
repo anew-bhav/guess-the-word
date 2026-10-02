@@ -1,0 +1,1035 @@
+/* Design Chain — Phase 2: designer-tool theme.
+   Mobile-first: everything below is written for a phone viewport by default.
+   The only concession to larger screens is pinning `.screen` to a phone-width
+   column (see below) so the layout never just stretches out on desktop. */
+
+:root {
+  --canvas: #eceef1;
+  --surface: #ffffff;
+  --surface-alt: #f4f5f7;
+  --border: #d7d9de;
+  --border-strong: #c3c6cc;
+  --text-primary: #17181b;
+  --text-secondary: #6b6e76;
+  --text-tertiary: #9497a0;
+  --accent: #2d6cdf;
+  --accent-soft: #eaf0fc;
+  --accent-contrast: #ffffff;
+  --success: #3fa066;
+  --success-soft: #e3f5ea;
+  --danger: #d9455f;
+  --danger-soft: #fbe7ea;
+  --warning: #c98a1f;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 2px 10px rgba(20, 20, 30, 0.06);
+  --shadow-md: 0 12px 40px rgba(20, 20, 30, 0.12);
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --app-bar-height: 51px;
+  color-scheme: light;
+}
+
+/* Dark palette. `ui.js` (plus the no-flash inline script in index.html's
+   <head>) always resolves and sets data-theme="light"|"dark" on <html> —
+   from a saved explicit choice, or else from the system preference — so
+   this attribute selector alone covers both cases; no media query needed. */
+:root[data-theme="dark"] {
+  --canvas: #1b1c1f;
+  --surface: #232428;
+  --surface-alt: #2a2b30;
+  --border: #3a3b40;
+  --border-strong: #4a4b52;
+  --text-primary: #f2f2f4;
+  --text-secondary: #a7a9b1;
+  --text-tertiary: #7a7c84;
+  --accent: #5b8def;
+  --accent-soft: rgba(91, 141, 239, 0.16);
+  --accent-contrast: #ffffff;
+  --success: #4fbd80;
+  --success-soft: rgba(79, 189, 128, 0.16);
+  --danger: #e5677e;
+  --danger-soft: rgba(229, 103, 126, 0.18);
+  --warning: #e0b155;
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  /* Shows on either side of the phone-width column once the viewport is
+     wider than it; identical to the app background on an actual phone. */
+  background: var(--canvas);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.btn {
+  padding: 0.9em 1.6em;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: none;
+  min-height: 44px;
+  transition: background 0.2s var(--ease), transform 0.15s var(--ease);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.btn-secondary {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+}
+
+.btn:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Screens ---------- */
+
+.screen {
+  /* 100vh/100dvh minus the app-bar above it, so app-bar + screen together
+     fill exactly one viewport instead of overflowing it. */
+  min-height: calc(100vh - var(--app-bar-height) - env(safe-area-inset-top, 0px));
+  min-height: calc(100dvh - var(--app-bar-height) - env(safe-area-inset-top, 0px));
+  display: flex;
+  flex-direction: column;
+  max-width: 480px;
+  margin: 0 auto;
+  background: var(--surface);
+  position: relative;
+}
+
+@media (min-width: 481px) {
+  .screen {
+    box-shadow: var(--shadow-md);
+  }
+}
+
+/* ---------- App bar ---------- */
+/* Sits outside both .screen sections, so it's always visible — above the
+   start panel, gameplay and game-over screen alike — without ever competing
+   with the HUD's own top-right timer ring for the same corner. */
+
+.app-bar {
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: calc(0.6rem + env(safe-area-inset-top, 0px)) 1rem 0.6rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0; /* lets the badge truncate/wrap instead of overflowing on a narrow phone */
+}
+
+.app-bar-title {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* Small, unobtrusive — not an error state, just a heads-up. (Phase 4) */
+.offline-badge {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  padding: 0.2em 0.55em;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.theme-toggle {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s var(--ease), transform 0.15s var(--ease);
+}
+
+.theme-toggle:active {
+  transform: scale(0.92);
+}
+
+.theme-toggle:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Start panel (sits in the board, in place of the word card) ---------- */
+
+.start-panel {
+  max-width: 480px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.logo {
+  font-size: 2.4rem;
+  margin: 0;
+}
+
+.tagline {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.example {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 1.1rem;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.9em 1em;
+  width: 100%;
+}
+
+.example-word {
+  padding: 0.2em 0.5em;
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.example-guess {
+  background: var(--success-soft);
+  animation: example-pop 2.4s ease-in-out infinite;
+}
+
+@keyframes example-pop {
+  0%, 40%, 100% { transform: scale(1); }
+  20% { transform: scale(1.12); }
+}
+
+.example-plus,
+.example-arrow {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.example-result {
+  padding: 0.2em 0.5em;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.best-score {
+  font-size: 1rem;
+  color: var(--text-secondary);
+}
+
+.camera-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.camera-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.camera-privacy-note {
+  margin: -0.4rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+/* Lets the player visually confirm offline caching actually finished before
+   they rely on it (e.g. before switching to airplane mode for a demo) —
+   rather than having to guess how long the background download takes. */
+.offline-ready-status {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: center;
+  padding: 0.35em 0.8em;
+  border-radius: 999px;
+}
+
+.offline-ready-status.preparing {
+  color: var(--text-secondary);
+  background: var(--surface-alt);
+}
+
+.offline-ready-status.ready {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.camera-status-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  text-align: center;
+}
+
+.camera-status-message {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* ---------- HUD (toolbar) ---------- */
+
+.hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Timer above score, stacked on the left; tries (.hud-tries) sit on the
+   right as .hud's other flex child — same markup in both the normal and
+   AR screens, so this layout applies identically to both. */
+.hud-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.hud-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 3.2rem;
+}
+
+.hud-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.hud-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.hud-tries {
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.try-swatch {
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  background: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  display: inline-block;
+  transition: background 0.2s var(--ease), transform 0.2s var(--ease);
+}
+
+.try-swatch.lost {
+  background: var(--border-strong);
+  transform: scale(0.85);
+}
+
+.hud-timer {
+  position: relative;
+  width: 52px;
+  height: 52px;
+}
+
+@keyframes timer-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+.hud-timer.pulse {
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+.timer-ring {
+  width: 52px;
+  height: 52px;
+  transform: rotate(-90deg);
+}
+
+.timer-ring-bg {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 5;
+}
+
+.timer-ring-progress {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 163.36;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1s linear, stroke 0.2s linear;
+}
+
+.timer-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+/* ---------- AR mode (camera + face tracking) ---------- */
+/* #ar-layer sits as the first child of #game-screen (see index.html), so it
+   paints behind the HUD/board/input-bar (later siblings) without needing
+   explicit z-index — see the comment above .hud's ar-active override below
+   for why the HUD still needs an opaque-ish background of its own.
+
+   position: absolute (not fixed) deliberately, contained within #game-screen
+   (.screen, which is position: relative and capped at max-width: 480px) —
+   so on a wide desktop window the camera feed stays inside the same
+   phone-width frame as the rest of the app instead of covering the full
+   browser viewport edge to edge. On an actual phone .screen already fills
+   the viewport, so this is a no-op there. */
+
+.ar-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  pointer-events: none;
+}
+
+.camera-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* mirror for a natural, selfie-style view */
+}
+
+.move-into-frame {
+  position: absolute;
+  bottom: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  background: var(--surface);
+  color: var(--text-primary);
+  padding: 0.5em 1.1em;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Offset from the "move into frame" hint's position (above) — the two are
+   unrelated conditions (no face detected vs. the microphone reconnecting)
+   that could in principle both be true at once, so they shouldn't overlap. */
+.voice-reconnecting {
+  bottom: 32%;
+  color: var(--accent);
+}
+
+/* Small, non-blocking indicator while the face-tracking model downloads in
+   the background (Phase 4) — gameplay and the camera view are never gated
+   on this, so it's deliberately a quiet corner note, not a loading screen. */
+.model-load-progress {
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text-secondary);
+  padding: 0.3em 0.9em;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* The HUD previously got a translucent, blurred backing in AR mode (to stay
+   legible over the live camera feed) — removed per feedback: the HUD now
+   floats directly over the video with no panel behind it at all, leaving
+   more visible room for the word card. (The matching rule for .input-bar
+   was dead code by this point anyway — the input bar is always hidden in
+   AR mode now, see activateArMode() in ui.js.) */
+
+/* Removing the HUD's background panel (above) left its text/ring/swatches
+   blending into whatever the camera happens to show behind them. A
+   drop-shadow halo — tinted with --surface, so it's a light glow in light
+   mode and a dark glow in dark mode — keeps every HUD element legible
+   against arbitrary video content without reintroducing any panel; unlike
+   a background, filter: drop-shadow() reaches every child (text, the SVG
+   timer ring, the swatches) at once. Kept deliberately light (one halo
+   layer, low blur, low opacity) — just enough for contrast, not a heavy
+   glow of its own. The HUD's own border-bottom (meant to separate it from
+   the board on an opaque screen) is also dropped here — floating alone
+   over the live video with nothing else around it, it just read as a
+   stray line rather than a separator. */
+#game-screen.ar-active .hud {
+  border-bottom: none;
+  filter: drop-shadow(0 0 2px var(--surface)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+}
+
+#game-screen.ar-active .board {
+  position: relative;
+}
+
+/* Positioned every frame by ui.js (left/top + a translate+scale transform)
+   while the face is tracked; otherwise behaves like the normal centered card. */
+#word-card.ar-tracked {
+  position: fixed;
+  z-index: 1;
+  margin: 0;
+}
+
+.word-card.faded {
+  opacity: 0.55;
+}
+
+/* ---------- Board / word card ---------- */
+
+.board {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.word-card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 2.25rem 2.5rem;
+  min-width: 260px;
+  max-width: 90vw;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.3s var(--ease), box-shadow 0.3s var(--ease), border-color 0.3s var(--ease), transform 0.2s var(--ease);
+}
+
+/* The in-game card reads as a selected text layer in a design tool: a
+   dashed selection outline plus corner handles (added below). */
+#word-card {
+  border-style: dashed;
+  border-width: 2px;
+  border-color: var(--accent);
+}
+
+.handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: var(--surface);
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+}
+
+.handle-tl { top: -5px; left: -5px; }
+.handle-tr { top: -5px; right: -5px; }
+.handle-bl { bottom: -5px; left: -5px; }
+.handle-br { bottom: -5px; right: -5px; }
+
+.word-card.correct .handle {
+  border-color: var(--success);
+}
+
+.word-card.wrong .handle {
+  border-color: var(--danger);
+}
+
+.word-card.correct {
+  background: var(--success-soft);
+  border-color: var(--success);
+  box-shadow: 0 0 0 4px var(--success-soft);
+}
+
+.word-card.wrong {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  animation: shake 0.35s ease;
+}
+
+/* The shake still visibly read as unstable/jittery in AR mode even once it
+   stopped displacing the card (see the translate-based fix below) — on
+   top of the card already moving slightly every frame to follow the face,
+   an extra wiggle read as the whole thing being shaky rather than a
+   distinct "wrong" cue. Fully disabled for the AR-tracked card; the red
+   background/border above is still the wrong-answer signal, just without
+   any motion. Non-AR mode keeps the shake as originally specified. */
+#word-card.ar-tracked.wrong {
+  animation: none;
+}
+
+/* Uses the standalone `translate` property, not `transform: translateX(...)`
+   — in AR mode, ui.js sets the card's position/scale via an inline
+   `transform` every frame (to follow the tracked face), and animating
+   `transform` here would override that inline value for the animation's
+   duration, yanking the card away from its tracked spot and snapping it
+   back once the shake ended. `translate` composes with `transform`
+   instead of replacing it, so the card shakes in place — relative to
+   wherever it currently is above the face — without ever displacing from
+   it. (In non-AR mode, where no inline transform is set, this renders
+   identically to the old transform-based version.) */
+@keyframes shake {
+  0%, 100% { translate: 0 0; }
+  20% { translate: -8px 0; }
+  40% { translate: 8px 0; }
+  60% { translate: -5px 0; }
+  80% { translate: 5px 0; }
+}
+
+.chain-toast {
+  position: absolute;
+  top: -1.9rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.3em 0.9em;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
+  white-space: nowrap;
+}
+
+.chain-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-8px);
+}
+
+.hint-btn {
+  position: absolute;
+  top: 0.7rem;
+  left: 0.7rem;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: hint-pop 0.25s ease;
+}
+
+.hint-btn:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@keyframes hint-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.hint-text {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  font-style: italic;
+  color: var(--text-secondary);
+  background: var(--surface-alt);
+  border-radius: var(--radius-sm);
+  padding: 0.6em 0.9em;
+}
+
+.card-main-word {
+  font-size: clamp(2rem, 8vw, 3.2rem);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  margin-top: 0.5rem;
+}
+
+.card-slots {
+  display: flex;
+  gap: 0.4em;
+  justify-content: center;
+  margin-top: 1.2rem;
+  flex-wrap: wrap;
+}
+
+.slot {
+  width: clamp(1.6rem, 6vw, 2.2rem);
+  height: clamp(2.2rem, 8vw, 2.8rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(1.2rem, 5vw, 1.6rem);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  border-bottom: 3px solid var(--border-strong);
+  text-transform: uppercase;
+}
+
+.slot.filled {
+  border-color: var(--accent);
+  animation: slot-pop 0.15s ease;
+}
+
+.slot.locked {
+  border-color: var(--text-tertiary);
+  color: var(--text-secondary);
+}
+
+@keyframes slot-pop {
+  0% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+.card-merged {
+  display: none;
+  font-size: clamp(1.8rem, 7vw, 2.6rem);
+  font-weight: 800;
+  color: var(--success);
+  margin-top: 0.5rem;
+  letter-spacing: 0.02em;
+}
+
+.word-card.correct .card-main-word,
+.word-card.correct .card-slots {
+  display: none;
+}
+
+.word-card.correct .card-merged {
+  display: block;
+}
+
+/* ---------- Input bar ---------- */
+
+.input-bar {
+  position: sticky;
+  bottom: 0;
+  padding: 0.8rem 1rem calc(0.8rem + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, var(--surface) 60%, transparent);
+}
+
+.guess-input {
+  width: 100%;
+  font-size: 1.1rem;
+  padding: 0.9em 1em;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  min-height: 48px;
+  transition: border-color 0.2s var(--ease);
+}
+
+.guess-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ---------- Game over screen (styled like an exported artboard) ---------- */
+
+#gameover-screen {
+  align-items: center;
+  padding: 1.5rem 1rem 2rem;
+}
+
+@keyframes gameover-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.gameover-wrap {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem 1.25rem 1.75rem;
+  animation: gameover-enter 0.4s var(--ease);
+}
+
+.export-tag {
+  display: block;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  color: var(--text-tertiary);
+}
+
+.gameover-header {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  padding-bottom: 0.5rem;
+  z-index: 1;
+  text-align: center;
+}
+
+.gameover-header h1 {
+  margin: 0 0 0.6rem;
+}
+
+@keyframes badge-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  70% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+.new-best-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-contrast);
+  background: var(--success);
+  padding: 0.3em 0.8em;
+  border-radius: 999px;
+  margin-bottom: 0.6rem;
+  animation: badge-pop 0.5s var(--ease);
+}
+
+.score-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.score-hero-value {
+  font-size: 3.2rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.score-hero-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  margin-top: 0.3rem;
+}
+
+.best-score-line {
+  margin: 0.5rem 0 1.1rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.best-score-line strong {
+  color: var(--text-primary);
+}
+
+.gameover-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.btn-icon {
+  display: inline-block;
+  margin-right: 0.3em;
+}
+
+.copy-confirm {
+  min-height: 1.2em;
+  font-size: 0.85rem;
+  color: var(--success);
+  margin: 0.4rem 0 0;
+}
+
+.terms-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.terms-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.terms-count {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+}
+
+.terms-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.term-card {
+  position: relative;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.9rem 1.1rem 0.9rem 2.9rem;
+}
+
+.term-card-index {
+  position: absolute;
+  left: 0.85rem;
+  top: 0.85rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.term-card.missed .term-card-index {
+  background: var(--danger);
+  color: var(--accent-contrast);
+}
+
+.term-card-name {
+  font-weight: 700;
+  text-transform: capitalize;
+  margin-bottom: 0.25rem;
+}
+
+.term-card-def {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.term-card.missed {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+.term-card.missed .term-card-name::after {
+  content: "Missed";
+  display: inline-block;
+  margin-left: 0.6em;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--danger);
+  color: var(--accent-contrast);
+  padding: 0.15em 0.5em;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+/* ---------- Reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
