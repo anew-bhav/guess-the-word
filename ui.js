@@ -64,6 +64,7 @@
     moveIntoFrameHint: document.getElementById("move-into-frame-hint"),
     resumeCard: document.getElementById("resume-card"),
     resumeBtn: document.getElementById("resume-btn"),
+    resumeBody: document.getElementById("resume-body"),
     switchToTypingBtn: document.getElementById("switch-to-typing-btn"),
     tapToSpeakBtn: document.getElementById("tap-to-speak-btn"),
     modelLoadProgress: document.getElementById("model-load-progress"),
@@ -510,7 +511,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v28";
+  const BUILD_VERSION = "v29";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -1561,7 +1562,42 @@
   // card explaining it. "Keep playing" resumes the timer and focuses the
   // input inside the tap, which is what lets iOS open the keyboard.
   // Applied on every device for consistency (Android is untested).
+  // Experiment (?resumetest): stay in camera mode across leaving the app —
+  // the camera is left running (never stopped or restarted), only the
+  // microphone is stopped and then restarted by the "Keep playing" tap.
+  // The v27 diagnostic showed the mic and recognizer both work after a
+  // switch, so this checks whether the old camera restart was what
+  // silenced voice. Regular players keep the switch-to-typing behavior.
+  const RESUME_TEST = new URLSearchParams(location.search).has("resumetest");
+  let resumeTestPending = false; // camera mode kept across a switch; voice restarts on "Keep playing"
+
+  function logCameraState(when) {
+    const video = el.cameraVideo;
+    const track = video && video.srcObject && video.srcObject.getVideoTracks ? video.srcObject.getVideoTracks()[0] : null;
+    appendVoiceDebugLine(
+      `+${voiceDebugElapsedSeconds()}s  ◇ camera ${when}: video paused=${video ? video.paused : "n/a"} readyState=${video ? video.readyState : "n/a"}` +
+        (track ? ` track readyState=${track.readyState} muted=${track.muted}` : " no track")
+    );
+  }
+
   document.addEventListener("visibilitychange", () => {
+    if (RESUME_TEST && document.hidden && arModeActive) {
+      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab hidden (resume test: camera kept, mic stopped)`);
+      pausedForResumeCard = true;
+      resumeTestPending = true;
+      updatePauseState();
+      clearPendingVoiceSubmit();
+      stopVoiceInput();
+      return;
+    }
+    if (RESUME_TEST && !document.hidden && resumeTestPending) {
+      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab visible again — pause card (resume test)`);
+      logCameraState("on return");
+      el.resumeBody.textContent = "Resume test: voice restarts when you continue. The camera was left running.";
+      el.resumeCard.classList.remove("hidden");
+      el.resumeBtn.focus();
+      return;
+    }
     if (document.hidden) {
       if (!arModeActive) return;
       appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab hidden`);
@@ -1579,6 +1615,16 @@
     el.resumeCard.classList.add("hidden");
     pausedForResumeCard = false;
     appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ keep playing tapped`);
+    if (resumeTestPending) {
+      resumeTestPending = false;
+      if (arModeActive) {
+        logCameraState("at tap");
+        if (el.cameraVideo.paused) el.cameraVideo.play().catch(() => {}); // in case iOS paused the element
+        startVoiceInput(); // inside the tap; no camera restart, no warm-up
+        updatePauseState();
+        return;
+      }
+    }
     updatePauseState();
     el.guessInput.focus();
   });
