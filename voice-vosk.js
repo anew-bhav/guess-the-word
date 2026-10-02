@@ -166,6 +166,115 @@
     }
   }
 
+  // iOS can leave a freshly connected audio graph silently dead: the
+  // pipeline reports "connected" and the context says "running", yet the
+  // ScriptProcessor never fires (seen on a real iPhone on some
+  // play-again starts — the player was heard by nobody for the whole
+  // round). So each connection is watched: if no audio buffer arrives
+  // within BUFFER_WATCH_MS, the graph is rebuilt on a fresh stream (attempt
+  // 2), then on a brand-new AudioContext (attempt 3), then reported as a
+  // failed start.
+  const BUFFER_WATCH_MS = 1500;
+  const MAX_PIPELINE_ATTEMPTS = 3;
+  let bufferWatchTimer = null;
+
+  function failStart(err) {
+    clearTimeout(bufferWatchTimer);
+    emitDebugEvent("error", (err && err.name) || String(err));
+    listening = false;
+    teardownAudio();
+    emitListeningChange(false);
+    emit(errorCallbacks, err && err.name === "NotAllowedError" ? "not-allowed" : "start-failed");
+  }
+
+  async function connectPipeline(model, mySession, attempt) {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+    });
+    if (!listening || mySession !== sessionId) {
+      teardownAudio();
+      return;
+    }
+    const track = stream.getAudioTracks()[0];
+    track.onmute = () => emitDebugEvent("vosk-audio", "track muted");
+    track.onunmute = () => emitDebugEvent("vosk-audio", "track unmuted");
+
+    prime(); // no-op if already running; outside a gesture it may stay suspended on iOS
+    recognizer = USE_GRAMMAR
+      ? new model.KaldiRecognizer(audioContext.sampleRate, buildGrammar())
+      : new model.KaldiRecognizer(audioContext.sampleRate);
+    recognizer.on("partialresult", (message) => {
+      const partial = message && message.result ? message.result.partial : "";
+      if (partial && partial.trim()) {
+        emitDebugEvent("interim", partial.trim());
+        emit(interimCallbacks, partial.trim());
+      }
+    });
+    recognizer.on("result", (message) => {
+      const text = message && message.result ? message.result.text : "";
+      if (text && text.trim()) {
+        emitDebugEvent("result", text.trim());
+        emit(resultCallbacks, text.trim(), [text.trim()]);
+      }
+    });
+
+    sourceNode = audioContext.createMediaStreamSource(stream);
+    processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+    // A ScriptProcessor only runs while connected to the destination;
+    // route it through a silent gain so the player never hears themselves.
+    muteNode = audioContext.createGain();
+    muteNode.gain.value = 0;
+    let firstBuffer = true;
+    processorNode.onaudioprocess = (event) => {
+      if (!recognizer) return;
+      if (firstBuffer) {
+        firstBuffer = false;
+        clearTimeout(bufferWatchTimer);
+        emitDebugEvent("audiostart", `context ${audioContext.state}, ${audioContext.sampleRate}Hz`);
+        emitListeningChange(true);
+      }
+      try {
+        recognizer.acceptWaveform(event.inputBuffer);
+      } catch (err) {
+        console.error("VoiceVosk: acceptWaveform failed", err);
+      }
+    };
+    sourceNode.connect(processorNode);
+    processorNode.connect(muteNode);
+    muteNode.connect(audioContext.destination);
+    emitDebugEvent("vosk-audio", `pipeline connected (attempt ${attempt}), context ${audioContext.state}`);
+
+    clearTimeout(bufferWatchTimer);
+    bufferWatchTimer = setTimeout(async () => {
+      if (!listening || mySession !== sessionId || !firstBuffer) return;
+      emitDebugEvent(
+        "vosk-audio",
+        `no audio after ${BUFFER_WATCH_MS}ms (context ${audioContext && audioContext.state}, track ${track.readyState} muted=${track.muted})`
+      );
+      teardownAudio();
+      if (attempt >= MAX_PIPELINE_ATTEMPTS) {
+        failStart(new Error("audio pipeline stayed silent"));
+        return;
+      }
+      if (attempt >= 2 && audioContext) {
+        emitDebugEvent("vosk-audio", "replacing the audio context");
+        try {
+          await audioContext.close();
+        } catch {
+          /* already closed */
+        }
+        audioContext = null;
+      }
+      if (!listening || mySession !== sessionId) return;
+      try {
+        await connectPipeline(model, mySession, attempt + 1);
+      } catch (err) {
+        failStart(err);
+      }
+    }, BUFFER_WATCH_MS);
+  }
+
   async function start() {
     if (listening) return;
     listening = true;
@@ -174,73 +283,15 @@
     try {
       const model = await loadModel();
       if (!listening || mySession !== sessionId) return;
-
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: false,
-        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
-      });
-      if (!listening || mySession !== sessionId) {
-        teardownAudio();
-        return;
-      }
-      const track = stream.getAudioTracks()[0];
-      track.onmute = () => emitDebugEvent("vosk-audio", "track muted");
-      track.onunmute = () => emitDebugEvent("vosk-audio", "track unmuted");
-
-      prime(); // no-op if already running; outside a gesture it may stay suspended on iOS
-      recognizer = USE_GRAMMAR
-        ? new model.KaldiRecognizer(audioContext.sampleRate, buildGrammar())
-        : new model.KaldiRecognizer(audioContext.sampleRate);
-      recognizer.on("partialresult", (message) => {
-        const partial = message && message.result ? message.result.partial : "";
-        if (partial && partial.trim()) {
-          emitDebugEvent("interim", partial.trim());
-          emit(interimCallbacks, partial.trim());
-        }
-      });
-      recognizer.on("result", (message) => {
-        const text = message && message.result ? message.result.text : "";
-        if (text && text.trim()) {
-          emitDebugEvent("result", text.trim());
-          emit(resultCallbacks, text.trim(), [text.trim()]);
-        }
-      });
-
-      sourceNode = audioContext.createMediaStreamSource(stream);
-      processorNode = audioContext.createScriptProcessor(4096, 1, 1);
-      // A ScriptProcessor only runs while connected to the destination;
-      // route it through a silent gain so the player never hears themselves.
-      muteNode = audioContext.createGain();
-      muteNode.gain.value = 0;
-      let firstBuffer = true;
-      processorNode.onaudioprocess = (event) => {
-        if (!recognizer) return;
-        if (firstBuffer) {
-          firstBuffer = false;
-          emitDebugEvent("audiostart", `context ${audioContext.state}, ${audioContext.sampleRate}Hz`);
-          emitListeningChange(true);
-        }
-        try {
-          recognizer.acceptWaveform(event.inputBuffer);
-        } catch (err) {
-          console.error("VoiceVosk: acceptWaveform failed", err);
-        }
-      };
-      sourceNode.connect(processorNode);
-      processorNode.connect(muteNode);
-      muteNode.connect(audioContext.destination);
-      emitDebugEvent("vosk-audio", `pipeline connected, context ${audioContext.state}`);
+      await connectPipeline(model, mySession, 1);
     } catch (err) {
-      emitDebugEvent("error", (err && err.name) || String(err));
-      listening = false;
-      teardownAudio();
-      emitListeningChange(false);
-      emit(errorCallbacks, err && err.name === "NotAllowedError" ? "not-allowed" : "start-failed");
+      failStart(err);
     }
   }
 
   function stop() {
     emitDebugEvent("stop");
+    clearTimeout(bufferWatchTimer);
     listening = false;
     sessionId++;
     teardownAudio();

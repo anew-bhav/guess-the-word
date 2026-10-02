@@ -511,7 +511,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v31";
+  const BUILD_VERSION = "v32";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -1549,6 +1549,15 @@
   function handleVoiceError(error) {
     console.error("Voice: recognition error", error);
     if (document.hidden) return; // errors while leaving the app are expected; camera mode ends anyway
+    if (error === "start-failed" && voiceActive && arModeActive) {
+      // The microphone couldn't start at all (e.g. the on-device recognizer's
+      // audio stayed silent through every rebuild): don't leave the timer
+      // frozen waiting for it — run the round and offer typing right away.
+      pausedByVoiceNotListening = false;
+      updatePauseState();
+      setSwitchToTypingOffered(true);
+      return;
+    }
     if (error === "not-allowed" || error === "service-not-allowed") {
       stopVoiceInput();
       announce("Voice input unavailable. Check microphone permissions to continue.");
