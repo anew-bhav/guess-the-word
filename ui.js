@@ -506,7 +506,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v24";
+  const BUILD_VERSION = "v25";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -1120,11 +1120,13 @@
       `+${voiceDebugElapsedSeconds()}s  ◇ listening: ${isListening} ${isListening ? "(timer resumed)" : "(timer paused)"}`
     );
     pausedByVoiceNotListening = !isListening;
+    // The silence clock runs across session restarts, not per session:
+    // Chrome on Android ends a session after ~5s of silence and every
+    // result, so a per-session 8s clock never fired there. It only resets
+    // when speech is heard (noteVoiceHeard()) or voice stops.
     if (isListening) {
       voiceHeardThisSession = false;
-      armVoiceSilenceTimer(SILENCE_NEW_SESSION_MS);
-    } else {
-      clearVoiceSilenceTimer();
+      if (!voiceSilenceTimer) armVoiceSilenceTimer(SILENCE_NEW_SESSION_MS);
     }
     updatePauseState();
   }
