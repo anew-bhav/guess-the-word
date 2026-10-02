@@ -510,7 +510,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v26";
+  const BUILD_VERSION = "v27";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -665,6 +665,46 @@
     header.appendChild(controls);
     voiceDebugEl.appendChild(header);
 
+    // Second row: microphone diagnostics — see runMicLevelTest() and
+    // runSpeechTest().
+    const testRow = document.createElement("div");
+    Object.assign(testRow.style, {
+      display: "flex",
+      gap: "0.4em",
+      padding: "0.3em 0.6em",
+      borderBottom: "1px solid rgba(255, 255, 255, 0.2)",
+    });
+    const makeTestBtn = (label, run) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      Object.assign(btn.style, {
+        pointerEvents: "auto",
+        font: "inherit",
+        color: "#fff",
+        background: "#5b4bb7",
+        border: "none",
+        borderRadius: "4px",
+        padding: "0.3em 0.7em",
+        cursor: "pointer",
+      });
+      btn.addEventListener("click", async () => {
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.textContent = `${label}…`;
+        try {
+          await run();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
+      });
+      return btn;
+    };
+    testRow.appendChild(makeTestBtn("Level test", runMicLevelTest));
+    testRow.appendChild(makeTestBtn("Speech test", runSpeechTest));
+    voiceDebugEl.appendChild(testRow);
+
     voiceDebugLogEl = document.createElement("pre");
     Object.assign(voiceDebugLogEl.style, {
       margin: "0",
@@ -707,6 +747,86 @@
     const url = new URL(location.href);
     url.searchParams.set("refresh", Date.now()); // a new URL, so nothing serves the page from a cache
     location.replace(url.toString());
+  }
+
+  // ---------- Microphone diagnostics (debug only) ----------
+  // After leaving the app on iPhone, Safari's speech recognizer starts but
+  // hears nothing. These two tests separate "the phone's microphone gives
+  // the page no sound" (no web-based recognizer could help) from "the mic
+  // works but Safari's recognizer doesn't" (an on-device recognizer such as
+  // Vosk would fix it). Run each before and after leaving the app.
+  const MIC_TEST_MS = 8000;
+  const debugSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const debugLog = (text) => appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◆ ${text}`);
+
+  // Opens a plain getUserMedia audio stream and logs its loudness once a
+  // second (peak and average RMS, 0–1). Talking should push the peak well
+  // above the silent baseline (typically under 0.01).
+  async function runMicLevelTest() {
+    if (voiceActive) {
+      debugLog("level test: stop the camera game first (voice is using the mic)");
+      return;
+    }
+    debugLog(`level test: talk now (${MIC_TEST_MS / 1000}s)`);
+    let stream = null;
+    let audioContext = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const track = stream.getAudioTracks()[0];
+      debugLog(`level test: track "${track.label}" readyState=${track.readyState} muted=${track.muted} enabled=${track.enabled}`);
+      track.onmute = () => debugLog("level test: track muted");
+      track.onunmute = () => debugLog("level test: track unmuted");
+
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      audioContext = new AudioCtx();
+      await audioContext.resume();
+      debugLog(`level test: audio context ${audioContext.state}`);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      audioContext.createMediaStreamSource(stream).connect(analyser);
+      const samples = new Float32Array(analyser.fftSize);
+
+      for (let second = 1; second <= MIC_TEST_MS / 1000; second++) {
+        let peak = 0;
+        let sum = 0;
+        for (let tick = 0; tick < 10; tick++) {
+          await debugSleep(100);
+          analyser.getFloatTimeDomainData(samples);
+          let squares = 0;
+          for (let i = 0; i < samples.length; i++) squares += samples[i] * samples[i];
+          const rms = Math.sqrt(squares / samples.length);
+          peak = Math.max(peak, rms);
+          sum += rms;
+        }
+        debugLog(`level ${second}s: peak ${peak.toFixed(4)}  avg ${(sum / 10).toFixed(4)}`);
+      }
+      debugLog("level test: done");
+    } catch (err) {
+      debugLog(`level test failed: ${(err && err.name) || err} ${(err && err.message) || ""}`);
+    } finally {
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+      if (audioContext) audioContext.close().catch(() => {});
+    }
+  }
+
+  // Runs Safari's/Chrome's speech recognizer alone (no game) and logs
+  // everything it reports, for comparison with the level test.
+  async function runSpeechTest() {
+    if (typeof Voice === "undefined" || !Voice.supported()) {
+      debugLog("speech test: speech recognition not supported here");
+      return;
+    }
+    if (voiceActive) {
+      debugLog("speech test: stop the camera game first (voice is already running)");
+      return;
+    }
+    debugLog(`speech test: say a few words (${MIC_TEST_MS / 1000}s)`);
+    const unsubscribeDebug = Voice.onDebugEvent(logVoiceDebugEvent);
+    Voice.start();
+    await debugSleep(MIC_TEST_MS);
+    Voice.stop();
+    unsubscribeDebug();
+    debugLog("speech test: done");
   }
 
   function appendVoiceDebugLine(line) {
