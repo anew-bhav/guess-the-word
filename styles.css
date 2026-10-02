@@ -501,6 +501,51 @@ button {
   box-shadow: var(--shadow-sm);
 }
 
+/* Centered over the AR view while the game waits for a tap after the tab
+   returns from the background. */
+.resume-btn {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  box-shadow: var(--shadow-md);
+}
+
+.resume-btn:active {
+  transform: translate(-50%, -50%) scale(0.97);
+}
+
+/* Small pill pinned near the bottom of the AR view, where the input bar
+   sits in typing mode. Large enough to tap, quiet enough to ignore. */
+.mic-retry-btn {
+  position: fixed;
+  bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  min-height: 44px;
+  padding: 0.55em 1.2em;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s var(--ease);
+}
+
+.mic-retry-btn:active {
+  transform: translateX(-50%) scale(0.97);
+}
+
+.mic-retry-btn:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Offset from the "move into frame" hint's position (above) — the two are
    unrelated conditions (no face detected vs. the microphone reconnecting)
    that could in principle both be true at once, so they shouldn't overlap. */

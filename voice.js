@@ -19,7 +19,9 @@
  *
  * onResult(callback) delivers the final recognized transcript (a plain
  * string, e.g. "drop shadow") for each phrase the player finishes saying —
- * this is the one that actually gets judged right or wrong.
+ * this is the one that actually gets judged right or wrong. A second
+ * argument holds every alternative transcript the engine offered (top one
+ * first), when it offers more than one.
  *
  * onInterimResult(callback) delivers the browser's best-guess-so-far
  * transcript *while the player is still talking*, updated repeatedly before
@@ -64,6 +66,15 @@ const Voice = (() => {
   // round's 30s timer while rarely, if ever, firing during normal thinking
   // pauses — this still catches genuinely dead sessions, just less eagerly.
   const WATCHDOG_TIMEOUT_MS = 20000;
+  // Minimum gap between stopping the recognizer and starting it again.
+  // Was 4000ms on the theory that iOS needs a few seconds to release the
+  // microphone, but later iPhone logs showed restarts after a 4s gap going
+  // silent too, while one 0.4s restart worked, so the length of the gap
+  // isn't what decides it. Kept short so recovering a silent session
+  // (ui.js's mic retry button and automatic check) is quick. start() waits
+  // out the rest of this gap (onListeningChange stays false, so ui.js
+  // keeps the timer paused meanwhile).
+  const MIN_RESTART_GAP_MS = 1000;
 
   let recognition = null;
   let listening = false; // true while we intend to keep listening (drives auto-restart)
@@ -74,6 +85,8 @@ const Voice = (() => {
   let debugCallbacks = [];
   let lastActivityAt = 0;
   let watchdogId = null;
+  let lastStoppedAt = 0;
+  let delayedStartTimer = null;
   let sessionId = 0; // bumped on every (re)start, so a stale restart timer can't act on a session that's already gone
 
   function supported() {
@@ -108,10 +121,10 @@ const Voice = (() => {
     };
   }
 
-  function emitResult(transcript) {
+  function emitResult(transcript, alternatives) {
     resultCallbacks.forEach((cb) => {
       try {
-        cb(transcript);
+        cb(transcript, alternatives);
       } catch (err) {
         console.error("Voice: onResult callback threw", err);
       }
@@ -198,7 +211,12 @@ const Voice = (() => {
     // the watchdog timeout above is also trying to minimize — so this is
     // a second lever on the same "fewer restarts, fewer clicks" goal.
     recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
+    // Ask for a few alternative transcripts per phrase — a real iPhone log
+    // showed "vote" heard as "Court"/"Abort" and "bleed" as "Blade"; the
+    // right word is often one of the engine's runners-up. ui.js checks every
+    // alternative, not just the top one. Engines that ignore this just
+    // return one, so it's harmless where unsupported.
+    recognition.maxAlternatives = 3;
 
     recognition.onstart = () => {
       noteActivity();
@@ -219,6 +237,12 @@ const Voice = (() => {
       emitDebugEvent("soundstart");
     };
     recognition.onsoundend = () => emitDebugEvent("soundend");
+    // Debug only: whether the browser says it actually began capturing
+    // audio. A real iPhone log showed sessions that fired `onstart` but
+    // never heard anything for 20–40s; these show whether the mic itself
+    // ever came up in those sessions.
+    recognition.onaudiostart = () => emitDebugEvent("audiostart");
+    recognition.onaudioend = () => emitDebugEvent("audioend");
 
     recognition.onresult = (event) => {
       noteActivity();
@@ -227,8 +251,12 @@ const Voice = (() => {
       const transcript = last[0] ? last[0].transcript : "";
       if (!transcript.trim()) return;
       if (last.isFinal) {
+        const alternatives = Array.from(last)
+          .map((alt) => (alt.transcript || "").trim())
+          .filter(Boolean);
         emitDebugEvent("result", transcript.trim());
-        emitResult(transcript.trim());
+        if (alternatives.length > 1) emitDebugEvent("alternatives", alternatives.slice(1));
+        emitResult(transcript.trim(), alternatives);
       } else {
         emitDebugEvent("interim", transcript.trim());
         emitInterimResult(transcript.trim());
@@ -282,22 +310,27 @@ const Voice = (() => {
       }
       recognition = null;
     }
-    setTimeout(() => {
-      if (listening && mySession === sessionId) {
-        try {
-          createAndStart();
-        } catch (err) {
-          listening = false;
-          stopWatchdog();
-          emitError("restart-failed");
-        }
+    setTimeout(async () => {
+      if (!listening || mySession !== sessionId) return;
+      await warmUp(); // un-mute the page's microphone first — see warmUp()
+      if (!listening || mySession !== sessionId) return;
+      try {
+        createAndStart();
+      } catch (err) {
+        listening = false;
+        stopWatchdog();
+        emitError("restart-failed");
       }
-    }, 250); // brief pause so the browser can actually release the previous session/mic first
+    }, MIN_RESTART_GAP_MS); // brief pause so the browser can release the previous session first
   }
 
   function startWatchdog() {
     stopWatchdog();
     watchdogId = setInterval(() => {
+      if (document.hidden) {
+        noteActivity(); // a hidden page hears nothing by design; don't count it as a dead session
+        return;
+      }
       if (listening && Date.now() - lastActivityAt > WATCHDOG_TIMEOUT_MS) {
         forceRestart();
       }
@@ -319,6 +352,19 @@ const Voice = (() => {
     if (listening) return; // already running
 
     listening = true;
+    const wait = MIN_RESTART_GAP_MS - (Date.now() - lastStoppedAt);
+    if (wait > 0) {
+      emitDebugEvent("start-delayed", { ms: wait });
+      delayedStartTimer = setTimeout(() => {
+        delayedStartTimer = null;
+        if (listening) beginListening();
+      }, wait);
+      return;
+    }
+    beginListening();
+  }
+
+  function beginListening() {
     try {
       createAndStart();
       startWatchdog();
@@ -328,12 +374,43 @@ const Voice = (() => {
     }
   }
 
+  // Opens and immediately closes a plain getUserMedia microphone stream.
+  // iOS mutes a page's microphone capture shortly after the page goes to
+  // the background, and SpeechRecognition doesn't un-mute it on its own —
+  // a recognizer started afterwards fires `start`/`audiostart` but gets no
+  // audio, which matches every silent session in the real iPhone logs
+  // (the camera's own getUserMedia is video-only, so it never un-mutes the
+  // microphone). A direct audio request does; this is the "warm up the
+  // microphone" workaround documented for iOS WebSpeech. Never throws —
+  // a failure is only logged, and recognition is started regardless.
+  async function warmUp() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      emitDebugEvent("mic-warmup", "ok");
+    } catch (err) {
+      emitDebugEvent("mic-warmup", `failed: ${(err && err.name) || err}`);
+    }
+  }
+
+  // Tears down the current session and starts a new one after
+  // MIN_RESTART_GAP_MS — ui.js uses this when the player taps "Not hearing
+  // me?" or when a resumed session hears nothing at all.
+  function restart() {
+    if (!listening) return;
+    forceRestart();
+  }
+
   function stop() {
     emitDebugEvent("stop");
     emitListeningChange(false); // onend is nulled out below, so it won't emit this on its own
     listening = false;
     stopWatchdog();
+    clearTimeout(delayedStartTimer);
+    delayedStartTimer = null;
     if (recognition) {
+      lastStoppedAt = Date.now(); // only a recognizer that actually ran needs time to release the mic
       recognition.onend = null; // don't auto-restart on an intentional stop
       try {
         recognition.stop();
@@ -344,5 +421,5 @@ const Voice = (() => {
     }
   }
 
-  return { supported, start, stop, onResult, onInterimResult, onError, onListeningChange, onDebugEvent };
+  return { supported, start, stop, restart, warmUp, onResult, onInterimResult, onError, onListeningChange, onDebugEvent };
 })();

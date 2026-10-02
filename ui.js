@@ -63,6 +63,8 @@
     cameraVideo: document.getElementById("camera-video"),
     moveIntoFrameHint: document.getElementById("move-into-frame-hint"),
     voiceReconnectingHint: document.getElementById("voice-reconnecting-hint"),
+    resumeBtn: document.getElementById("resume-btn"),
+    micRetryBtn: document.getElementById("mic-retry-btn"),
     modelLoadProgress: document.getElementById("model-load-progress"),
     cameraToggleInput: document.getElementById("camera-toggle-input"),
     cameraStatusPanel: document.getElementById("camera-status-panel"),
@@ -72,6 +74,7 @@
 
   let activeSecondWord = ""; // second word of the current round, for slot rendering
   let activeTerm = null; // full term object for the current round, for the hint text
+  let previousTerm = null; // the round before's term, to ignore late voice echoes of it — see isEchoOfPreviousTerm()
   let toastTimer = null;
   let wrongResetTimer = null;
 
@@ -244,6 +247,7 @@
 
   function renderRound(term, showNewChainMessage) {
     activeSecondWord = term.second;
+    previousTerm = activeTerm;
     activeTerm = term;
 
     logVoiceDebugRound(term);
@@ -260,7 +264,8 @@
     el.guessInput.disabled = false;
     el.guessInput.value = "";
     el.guessInput.maxLength = activeSecondWord.length;
-    el.guessInput.focus();
+    if (typingFallbackActive && voiceHeardThisSession) hideTypingFallback();
+    if (!arModeActive || typingFallbackActive) el.guessInput.focus();
 
     if (showNewChainMessage) showChainToast();
   }
@@ -448,6 +453,14 @@
   // visible feedback — the number only needs to comfortably span a brief
   // pause between two final fragments, not feel instant on its own anymore.
   const VOICE_SUBMIT_DEBOUNCE_MS = 500;
+  // How long to wait after the camera is live before starting the
+  // microphone. Two real iPhone logs showed microphone sessions started
+  // together with (or just before) the camera reporting themselves as
+  // started — even firing `audiostart` — but hearing nothing until iOS
+  // raised `audio-capture` 20s later, while sessions started after the
+  // camera had been running a moment worked. The timer stays paused for
+  // this wait (see startVoiceInputAfterCameraSettles()).
+  const CAMERA_SETTLE_MS = 1000;
 
   let cameraEnabled = false;
   let arModeActive = false;
@@ -462,6 +475,13 @@
   let pausedByNoFace = false;
   let pausedByTabHidden = false;
   let pausedByVoiceNotListening = false;
+  // After "Tap to resume", the timer stays paused until the microphone
+  // actually hears something — see beginResumeSpeechCheck().
+  let pausedAwaitingSpeech = false;
+  // Typing fallback inside AR mode — see showTypingFallback().
+  let voiceSilenceTimer = null;
+  let voiceHeardThisSession = false;
+  let typingFallbackActive = false;
 
   // Voice input (AR mode only — see voice.js). In AR mode the player can
   // only speak their answer, never type it — activateArMode()/
@@ -474,8 +494,9 @@
   let unsubscribeVoiceDebug = null;
   let unsubscribeVoiceListening = null;
   let pendingVoiceParts = []; // transcript fragments collected since the last submit
-  let lastInterimPreview = ""; // most recent in-progress preview shown in the slots — see handleVoiceResult()'s fallback check
   let voiceSubmitTimer = null;
+  let voiceSettleTimer = null;
+  let interimMatchedGuess = ""; // an interim this utterance that would have been accepted — see handleVoiceResult()
 
   // ---------- Voice debug overlay (debugging only) ----------
   // Shows every recognition lifecycle signal (session start/end, speech and
@@ -485,6 +506,9 @@
   // (?debugvoice), so regular players never see this: created lazily the
   // first time it's actually needed, never part of the normal page markup.
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
+  // Shown in the copied debug log so a pasted log says which code ran.
+  // Keep in sync with CACHE_VERSION in sw.js.
+  const BUILD_VERSION = "v22";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -506,6 +530,7 @@
   function buildVoiceDebugHeader() {
     return [
       "Design Chain voice debug log",
+      `Build: ${BUILD_VERSION}`,
       `Captured: ${new Date().toISOString()}`,
       `User agent: ${navigator.userAgent}`,
       `Voice.supported(): ${typeof Voice !== "undefined" ? Voice.supported() : "Voice module not loaded"}`,
@@ -518,7 +543,11 @@
   }
 
   async function copyVoiceDebugLog() {
-    const text = buildVoiceDebugHeader() + "\n" + voiceDebugFullLog.join("\n") + "\n";
+    // The closing "copied" line puts the moment of copying on the log's own
+    // clock, so a log that ends mid-session shows how long it ran after the
+    // last event (e.g. 30s of silence after `audiostart` = a deaf mic).
+    const copiedLine = `+${voiceDebugElapsedSeconds()}s  ◇ copied (game ${Game.getState() && !Game.getState().over ? "in progress" : "not running"})`;
+    const text = buildVoiceDebugHeader() + "\n" + voiceDebugFullLog.join("\n") + "\n" + copiedLine + "\n";
     try {
       await navigator.clipboard.writeText(text);
       return true;
@@ -568,7 +597,7 @@
       color: "#9a9a9a",
     });
     const title = document.createElement("span");
-    title.textContent = "voice debug";
+    title.textContent = `voice debug · ${BUILD_VERSION}`;
     header.appendChild(title);
 
     voiceDebugCopyBtn = document.createElement("button");
@@ -608,8 +637,27 @@
       voiceDebugCollapseBtn.textContent = voiceDebugCollapsed ? "▸ Expand" : "▾ Collapse";
     });
 
+    const hardRefreshBtn = document.createElement("button");
+    hardRefreshBtn.type = "button";
+    hardRefreshBtn.textContent = "Hard refresh";
+    Object.assign(hardRefreshBtn.style, {
+      pointerEvents: "auto",
+      font: "inherit",
+      color: "#fff",
+      background: "#b5452f",
+      border: "none",
+      borderRadius: "4px",
+      padding: "0.3em 0.7em",
+      cursor: "pointer",
+    });
+    hardRefreshBtn.addEventListener("click", () => {
+      hardRefreshBtn.textContent = "Refreshing…";
+      hardRefresh();
+    });
+
     const controls = document.createElement("div");
     Object.assign(controls.style, { display: "flex", gap: "0.4em" });
+    controls.appendChild(hardRefreshBtn);
     controls.appendChild(voiceDebugCopyBtn);
     controls.appendChild(voiceDebugCollapseBtn);
     header.appendChild(controls);
@@ -629,6 +677,34 @@
 
     document.body.appendChild(voiceDebugEl);
     return voiceDebugEl;
+  }
+
+  // Debug only: iOS Safari has no hard-reload, and the cache-first service
+  // worker otherwise needs two reloads to pick up a new deploy. Unregisters
+  // the service worker, deletes its caches, and reloads from the network
+  // (keeping ?debugvoice). The fresh page re-registers the service worker
+  // and precaches everything again.
+  async function hardRefresh() {
+    // Release the microphone and camera before reloading — a real iPhone
+    // log showed the reloaded page's first mic session silent when the
+    // refresh was tapped mid-game with the mic still on.
+    stopVoiceInput();
+    if (typeof Face !== "undefined") Face.stopCamera();
+    try {
+      if ("serviceWorker" in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+      }
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((key) => caches.delete(key)));
+      }
+    } catch (err) {
+      console.error("Hard refresh: cleanup failed, reloading anyway", err);
+    }
+    const url = new URL(location.href);
+    url.searchParams.set("refresh", Date.now()); // a new URL, so nothing serves the page from a cache
+    location.replace(url.toString());
   }
 
   function appendVoiceDebugLine(line) {
@@ -670,7 +746,7 @@
     // acts on.
     let matchInfo = "";
     if ((event.type === "result" || event.type === "interim") && typeof event.detail === "string") {
-      const accepted = typeof Game !== "undefined" && typeof Game.wouldAccept === "function" && Game.wouldAccept(event.detail);
+      const accepted = !!findAcceptedVoiceGuess([event.detail]);
       matchInfo = accepted ? "  → ✓ matches" : "  → ✗ no match";
     }
 
@@ -812,7 +888,7 @@
   function updatePauseState() {
     const state = Game.getState();
     if (!state) return;
-    const shouldPause = pausedByNoFace || pausedByTabHidden || pausedByVoiceNotListening;
+    const shouldPause = pausedByNoFace || pausedByTabHidden || pausedByVoiceNotListening || pausedAwaitingSpeech;
     if (shouldPause && !state.paused) Game.pauseTimer();
     else if (!shouldPause && state.paused) Game.resumeTimer();
   }
@@ -854,7 +930,9 @@
     el.gameScreen.classList.add("ar-active");
     el.arLayer.classList.remove("hidden");
     el.wordCard.classList.add("ar-tracked");
-    el.guessForm.classList.add("hidden"); // AR mode: speak the answer, never type it
+    el.guessForm.classList.add("hidden"); // AR mode: speak the answer (typing only as a fallback — see showTypingFallback())
+    typingFallbackActive = false;
+    voiceHeardThisSession = false;
 
     el.modelLoadProgress.classList.add("hidden");
     unsubscribeFacePosition = Face.onFacePosition(handleFacePosition);
@@ -925,10 +1003,18 @@
     el.moveIntoFrameHint.classList.add("hidden");
     el.modelLoadProgress.classList.add("hidden");
     el.guessForm.classList.remove("hidden"); // restore typing for non-AR play
+    typingFallbackActive = false;
+    voiceHeardThisSession = false;
+    nextSilenceCheckMs = SILENCE_NEW_SESSION_MS;
+    el.resumeBtn.classList.add("hidden");
+    clearTimeout(voiceSettleTimer);
+    voiceSettleTimer = null;
 
     pausedByNoFace = false;
     pausedByTabHidden = false;
     pausedByVoiceNotListening = false;
+    pausedAwaitingSpeech = false;
+    clearVoiceSilenceTimer();
   }
 
   // ---------- Voice input (AR mode) ----------
@@ -937,6 +1023,28 @@
   // above), so there's no typing fallback here if speech recognition isn't
   // supported or the player denies microphone access; see announce() calls
   // below for the (non-visual, screen-reader only) reporting of that case.
+  // Starts voice input once the camera has had CAMERA_SETTLE_MS to settle
+  // (see that constant). The timer is paused and the "Reconnecting
+  // microphone…" hint shown for the wait, the same way startVoiceInput()
+  // handles waiting for the microphone itself.
+  // Also warms up the microphone first (Voice.warmUp()) — iOS leaves a
+  // page's microphone muted after it's been in the background, and on a
+  // fresh load after a reload. onStarted runs right after voice starts.
+  function startVoiceInputAfterCameraSettles(onStarted) {
+    clearTimeout(voiceSettleTimer);
+    pausedByVoiceNotListening = true;
+    refreshVoiceHint();
+    updatePauseState();
+    voiceSettleTimer = setTimeout(async () => {
+      voiceSettleTimer = null;
+      if (!arModeActive || document.hidden) return;
+      if (typeof Voice !== "undefined" && typeof Voice.warmUp === "function") await Voice.warmUp();
+      if (!arModeActive || document.hidden) return;
+      startVoiceInput();
+      if (onStarted) onStarted();
+    }, CAMERA_SETTLE_MS);
+  }
+
   function startVoiceInput() {
     if (typeof Voice === "undefined" || !Voice.supported()) return false;
 
@@ -958,7 +1066,7 @@
     // anything about. handleVoiceListeningChange() below clears this the
     // moment Voice confirms it's actually listening.
     pausedByVoiceNotListening = true;
-    el.voiceReconnectingHint.classList.remove("hidden");
+    refreshVoiceHint();
     updatePauseState();
 
     Voice.start();
@@ -966,12 +1074,125 @@
     return true;
   }
 
+  // One hint pill, three messages: waiting on the microphone itself takes
+  // priority over waiting for the player's first words after a resume.
+  // Also owns the mic retry button: shown whenever voice is the live input,
+  // hidden while the player is away or the resume button is up.
+  function refreshVoiceHint() {
+    el.micRetryBtn.classList.toggle("hidden", !(voiceActive && arModeActive && !pausedByTabHidden && !typingFallbackActive));
+    const hint = el.voiceReconnectingHint;
+    const hintAllowed = arModeActive && !pausedByTabHidden;
+    if (hintAllowed && pausedByVoiceNotListening) {
+      hint.textContent = "Reconnecting microphone…";
+      hint.classList.remove("hidden");
+    } else if (hintAllowed && pausedAwaitingSpeech) {
+      hint.textContent = "Say your answer to continue";
+      hint.classList.remove("hidden");
+    } else if (hintAllowed && typingFallbackActive && !voiceHeardThisSession) {
+      hint.textContent = "Mic not responding — type your answer";
+      hint.classList.remove("hidden");
+    } else {
+      hint.classList.add("hidden");
+    }
+  }
+
+  // Typing fallback. On iOS Safari, speech recognition regularly goes
+  // silent after the tab has been in the background: sessions start
+  // (`start`, `audiostart`) but get no audio, restarts don't help, and it
+  // only recovers on its own after ~20s. Every fix tried (camera-first
+  // ordering, restart gaps, keeping the session alive, a getUserMedia
+  // microphone warm-up) failed on a real iPhone. A silent session can't be
+  // detected directly — only by hearing nothing — so: if a microphone
+  // session hears nothing within a short window, the typing bar comes back
+  // and the player can keep playing by typing. The microphone is left
+  // alone (no restart loop) so iOS can recover it; once it hears the player
+  // again, the next round goes back to voice-only.
+  //
+  // Windows: after a resume or a mic retry tap the player is about to
+  // speak, so 3s (the timer is frozen meanwhile); for any other new
+  // session, including game start, 8s (the timer runs, since the player may
+  // just be thinking — the typing bar is only offered, not forced).
+  const SILENCE_AFTER_RESUME_MS = 3000;
+  const SILENCE_NEW_SESSION_MS = 8000;
+  let nextSilenceCheckMs = SILENCE_NEW_SESSION_MS;
+
+  function beginResumeSpeechCheck() {
+    pausedAwaitingSpeech = true;
+    nextSilenceCheckMs = SILENCE_AFTER_RESUME_MS; // used when the new session confirms it's listening
+    refreshVoiceHint();
+    updatePauseState();
+    armVoiceSilenceTimer(SILENCE_AFTER_RESUME_MS);
+  }
+
+  function armVoiceSilenceTimer(ms) {
+    clearTimeout(voiceSilenceTimer);
+    voiceSilenceTimer = setTimeout(handleVoiceSilence, ms);
+  }
+
+  function clearVoiceSilenceTimer() {
+    clearTimeout(voiceSilenceTimer);
+    voiceSilenceTimer = null;
+  }
+
+  function handleVoiceSilence() {
+    voiceSilenceTimer = null;
+    if (!voiceActive || !arModeActive || pausedByTabHidden || voiceHeardThisSession) return;
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ nothing heard — switching to typing`);
+    pausedAwaitingSpeech = false;
+    showTypingFallback();
+    refreshVoiceHint();
+    updatePauseState();
+  }
+
+  // Any interim or final transcript: this session can hear the player.
+  function noteVoiceHeard() {
+    clearVoiceSilenceTimer();
+    voiceHeardThisSession = true;
+    if (pausedAwaitingSpeech) {
+      pausedAwaitingSpeech = false;
+      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ speech heard, timer resumed`);
+      updatePauseState();
+    }
+    refreshVoiceHint();
+  }
+
+  function showTypingFallback() {
+    if (typingFallbackActive) return;
+    typingFallbackActive = true;
+    el.guessForm.classList.remove("hidden");
+    announce("Microphone isn't responding. Type your answer.");
+  }
+
+  function hideTypingFallback() {
+    if (!typingFallbackActive) return;
+    typingFallbackActive = false;
+    el.guessForm.classList.add("hidden");
+    el.guessInput.blur(); // closes the on-screen keyboard
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ microphone back — voice only again`);
+  }
+
+  el.micRetryBtn.addEventListener("click", () => {
+    if (!voiceActive || !arModeActive) return;
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ mic retry tapped`);
+    clearPendingVoiceSubmit();
+    buildSlots(activeSecondWord, ""); // clear any half-heard letters from the deaf session
+    Voice.restart();
+    beginResumeSpeechCheck(); // timer stays paused until the new session hears the player
+  });
+
   function handleVoiceListeningChange(isListening) {
     appendVoiceDebugLine(
       `+${voiceDebugElapsedSeconds()}s  ◇ listening: ${isListening} ${isListening ? "(timer resumed)" : "(timer paused)"}`
     );
     pausedByVoiceNotListening = !isListening;
-    el.voiceReconnectingHint.classList.toggle("hidden", isListening);
+    if (isListening) {
+      voiceHeardThisSession = false;
+      armVoiceSilenceTimer(nextSilenceCheckMs);
+      nextSilenceCheckMs = SILENCE_NEW_SESSION_MS;
+    } else {
+      clearVoiceSilenceTimer();
+    }
+    refreshVoiceHint();
     updatePauseState();
   }
 
@@ -1001,7 +1222,9 @@
       unsubscribeVoiceDebug = null;
     }
     pausedByVoiceNotListening = false;
-    el.voiceReconnectingHint.classList.add("hidden");
+    clearVoiceSilenceTimer();
+    pausedAwaitingSpeech = false;
+    refreshVoiceHint();
   }
 
   // checkGuess() is already case/space/hyphen-insensitive, so a recognized
@@ -1042,20 +1265,89 @@
   // meant for the connecting word — "the feedback in blank is not the part
   // that is recognised, but something else." If what's been heard starts
   // with the main word currently on screen, strip that prefix off first so
-  // only the actual connecting-word attempt reaches the slots.
+  // only the actual connecting-word attempt reaches the slots. Cuts after
+  // the *last* occurrence, so a repeated attempt run together into one
+  // transcript ("full lead full bleed") previews just the latest one
+  // ("bleed").
   function extractConnectingWordGuess(heard, mainWord) {
     const normalizedHeard = heard.toLowerCase().replace(/[\s-]+/g, "");
     const normalizedMain = (mainWord || "").toLowerCase();
-    if (normalizedMain && normalizedHeard.startsWith(normalizedMain) && normalizedHeard.length > normalizedMain.length) {
-      return normalizedHeard.slice(normalizedMain.length);
+    const cut = normalizedMain ? normalizedHeard.lastIndexOf(normalizedMain) : -1;
+    if (cut >= 0 && normalizedHeard.length > cut + normalizedMain.length) {
+      return normalizedHeard.slice(cut + normalizedMain.length);
     }
     return normalizedHeard;
   }
 
-  function handleVoiceResult(rawTranscript) {
-    if (!voiceActive || el.guessInput.disabled) return; // ignore while a correct/wrong animation is playing
+  // A continuous session often runs repeated attempts together into one
+  // transcript — a real iPhone log had the player say "full bleed" twice
+  // and get "Full lead full bleed" back, which matched nothing as a whole
+  // and cost a try even though the correct answer was in it. Each candidate
+  // is tried whole first, then by its trailing words ("lead full bleed",
+  // "full bleed", "bleed"), since the last thing said is the player's
+  // latest attempt. Returns the first accepted string, or null. Uses
+  // Game.wouldAccept(), so nothing here spends a try.
+  function findAcceptedVoiceGuess(candidates) {
+    if (typeof Game === "undefined" || typeof Game.wouldAccept !== "function") return null;
+    for (const candidate of candidates) {
+      const words = sanitizeVoiceTranscript(candidate).split(/\s+/).filter(Boolean);
+      for (let start = 0; start < words.length; start++) {
+        const suffix = words.slice(start).join(" ");
+        if (Game.wouldAccept(suffix)) return suffix;
+      }
+    }
+    return null;
+  }
+
+  function isOnlyMainWord(transcript) {
+    const mainWord = ((activeTerm && activeTerm.first) || "").toLowerCase();
+    if (!mainWord) return false;
+    const words = transcript.toLowerCase().split(/\s+/).filter(Boolean);
+    return words.length > 0 && words.every((word) => word === mainWord);
+  }
+
+  // iOS sometimes delivers the just-answered phrase a second time, after the
+  // next round has started — real iPhone logs had "Use case" land again in
+  // the following "case" round, and "Machine" (the previous answer) in the
+  // next round, each costing a try. Neither the previous round's whole term
+  // nor its answer word is ever the current round's answer, so a result
+  // that's exactly either is ignored.
+  function isEchoOfPreviousTerm(transcript) {
+    if (!previousTerm) return false;
+    const normalize = (text) => text.toLowerCase().replace(/[\s-]+/g, "");
+    const heard = normalize(transcript);
+    return heard === normalize(previousTerm.term) || heard === normalize(previousTerm.second);
+  }
+
+  function handleVoiceResult(rawTranscript, rawAlternatives) {
+    if (!voiceActive || el.guessInput.disabled || pausedByTabHidden) return; // ignore during a correct/wrong animation, or while the player is away
+    noteVoiceHeard();
     const transcript = sanitizeVoiceTranscript(rawTranscript);
     if (!transcript) return; // nothing left after stripping (e.g. pure punctuation/noise)
+
+    // Accept if the final transcript, any of the engine's runner-up
+    // alternatives (a misheard "Blade" often has "bleed" among them), or any
+    // interim heard during this utterance matches. The interim case covers
+    // the engine "correcting" a right answer into a wrong one between the
+    // interim and the final — seen on real iPhones as "Mouse over" →
+    // "Mouse" and "Hunk junk" → "Hunk hunk". Checked before the main-word
+    // filter below, since the full term ("half tone") starts with it.
+    const acceptedGuess = findAcceptedVoiceGuess([transcript, ...(rawAlternatives || []), interimMatchedGuess]);
+    if (acceptedGuess) {
+      clearPendingVoiceSubmit();
+      el.guessInput.value = acceptedGuess;
+      submitCurrentGuess();
+      return;
+    }
+
+    // A result that's only the main word on screen ("Half", "Half half")
+    // is the player reading the card aloud or pausing before the second
+    // word, not a guess — a real iPhone log had "Half … tone" split into a
+    // "Half" result that cost a try, and a late "Tone" result landing in
+    // the next round (main word "tone") that cost another. Ignored rather
+    // than judged. Same for a late echo of the previous round's term.
+    if (isOnlyMainWord(transcript) || isEchoOfPreviousTerm(transcript)) return;
+
     pendingVoiceParts.push(transcript);
 
     // Fill the letter slots with what's been heard so far, exactly like
@@ -1072,7 +1364,7 @@
     // connecting word and the complete term on its own.
     const heardSoFar = pendingVoiceParts.join("");
     const slotGuess = extractConnectingWordGuess(heardSoFar, activeTerm && activeTerm.first);
-    buildSlots(activeSecondWord, slotGuess);
+    if (!typingFallbackActive) buildSlots(activeSecondWord, slotGuess); // don't overwrite letters the player is typing
 
     // Test this fragment alone first, before waiting on the debounce at
     // all. The connecting word the player needs to say is almost always a
@@ -1082,33 +1374,15 @@
     // by an unrelated fragment (background noise, a filler "um", a second
     // recognized chunk) landing elsewhere in the same debounce window and
     // getting concatenated into a guess that no longer matches anything.
-    if (Game.wouldAccept(transcript)) {
-      clearPendingVoiceSubmit();
-      el.guessInput.value = transcript;
-      submitCurrentGuess();
-      return;
-    }
-
-    // The final result can sometimes regress relative to the interim shown
-    // a moment before — confirmed on a real device: the interim built up
-    // to "Mouse over" (correct), but the browser's own final transcript
-    // "corrected" it down to just "Mouse", which matches nothing and would
-    // otherwise have wrongly cost a try for an answer the player actually
-    // got right and had already seen confirmed on screen. If the final
-    // transcript alone doesn't match but the last interim preview would
-    // have, trust the interim instead — it's what the player said and saw.
-    if (lastInterimPreview && Game.wouldAccept(lastInterimPreview)) {
-      const interimGuess = lastInterimPreview; // captured first — clearPendingVoiceSubmit() below resets lastInterimPreview to ""
-      clearPendingVoiceSubmit();
-      el.guessInput.value = interimGuess;
-      submitCurrentGuess();
-      return;
-    }
 
     clearTimeout(voiceSubmitTimer);
     voiceSubmitTimer = setTimeout(() => {
       const combined = pendingVoiceParts.join("");
       pendingVoiceParts = [];
+      // While typing is the fallback, voice can still answer correctly
+      // (above) but a non-matching voice result never costs a try or
+      // replaces what the player has typed.
+      if (typingFallbackActive) return;
       el.guessInput.value = combined;
       submitCurrentGuess();
     }, VOICE_SUBMIT_DEBOUNCE_MS);
@@ -1118,7 +1392,7 @@
     clearTimeout(voiceSubmitTimer);
     voiceSubmitTimer = null;
     pendingVoiceParts = [];
-    lastInterimPreview = "";
+    interimMatchedGuess = "";
   }
 
   // Purely visual: previews the in-progress (not-yet-final) transcript in
@@ -1135,17 +1409,20 @@
   // voice responses felt slow and gave "no feedback on what is being
   // listened."
   function handleVoiceInterimResult(rawTranscript) {
-    if (!voiceActive || el.guessInput.disabled) return;
+    if (!voiceActive || el.guessInput.disabled || pausedByTabHidden) return;
+    noteVoiceHeard();
     const transcript = sanitizeVoiceTranscript(rawTranscript);
     if (!transcript) return;
     const preview = pendingVoiceParts.join("") + transcript;
-    lastInterimPreview = preview; // remembered in case the eventual final result regresses relative to this — see handleVoiceResult()
+    const matched = findAcceptedVoiceGuess([preview]);
+    if (matched) interimMatchedGuess = matched; // kept until this utterance's final result — see handleVoiceResult()
     const slotGuess = extractConnectingWordGuess(preview, activeTerm && activeTerm.first);
-    buildSlots(activeSecondWord, slotGuess);
+    if (!typingFallbackActive) buildSlots(activeSecondWord, slotGuess); // don't overwrite letters the player is typing
   }
 
   function handleVoiceError(error) {
     console.error("Voice: recognition error", error);
+    if (document.hidden || pausedByTabHidden) return; // errors while away are expected; voice restarts on "Tap to resume"
     if (error === "not-allowed" || error === "service-not-allowed") {
       stopVoiceInput();
       announce("Voice input unavailable. Check microphone permissions to continue.");
@@ -1156,26 +1433,56 @@
   }
 
   // Saves the camera/battery while the tab isn't visible, and pausing the
-  // timer meanwhile means the player doesn't lose time to it. Restarts
-  // tracking automatically when the tab comes back, falling back to non-AR
-  // play for the rest of the game if the camera won't restart.
+  // timer meanwhile means the player doesn't lose time to it. When the tab
+  // comes back, the game waits on a "Tap to resume" button instead of
+  // restarting on its own: a real iPhone log showed the microphone session
+  // restarted automatically on return reporting itself as started but
+  // hearing nothing for ~40s (through a watchdog restart too) while the
+  // timer ran. Starting it from a tap alone didn't fix that (a second log),
+  // so the tap handler also starts the camera first and the microphone only
+  // after it settles; the tap itself keeps the timer paused until the
+  // player is ready. Falls back to non-AR play for the rest of the game
+  // if the camera won't restart.
   document.addEventListener("visibilitychange", () => {
     if (!arModeActive) return;
     if (document.hidden) {
       appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab hidden`);
       pausedByTabHidden = true;
+      refreshVoiceHint(); // hides the mic retry button while away
       updatePauseState();
+      clearTimeout(voiceSettleTimer);
+      voiceSettleTimer = null;
+      clearVoiceSilenceTimer();
+      clearPendingVoiceSubmit();
       if (typeof Face !== "undefined") Face.stopCamera();
-      stopVoiceInput();
+      stopVoiceInput(); // restarted, after a microphone warm-up, on "Tap to resume"
     } else {
-      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab visible again`);
-      pausedByTabHidden = false;
-      updatePauseState();
-      if (typeof Face !== "undefined") {
-        Face.startCamera(el.cameraVideo).catch(() => deactivateArMode());
-      }
-      startVoiceInput();
+      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab visible again (waiting for tap)`);
+      el.resumeBtn.classList.remove("hidden");
+      el.resumeBtn.focus();
     }
+  });
+
+  el.resumeBtn.addEventListener("click", async () => {
+    el.resumeBtn.classList.add("hidden");
+    if (!arModeActive) return;
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ resume tapped`);
+    try {
+      if (typeof Face !== "undefined") await Face.startCamera(el.cameraVideo);
+    } catch {
+      pausedByTabHidden = false;
+      deactivateArMode();
+      return;
+    }
+    if (!arModeActive || document.hidden) return;
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ camera live`);
+    // Hand the pause over from "away" to "waiting to hear the player"
+    // before un-setting pausedByTabHidden, so the timer never ticks between.
+    pausedAwaitingSpeech = true;
+    pausedByTabHidden = false;
+    startVoiceInputAfterCameraSettles(beginResumeSpeechCheck);
+    refreshVoiceHint();
+    updatePauseState();
   });
 
   async function startWithCamera() {
@@ -1189,7 +1496,7 @@
       // hides it again, since AR mode never shows it) has to run after.
       beginRound();
       activateArMode();
-      startVoiceInput();
+      startVoiceInputAfterCameraSettles();
     } catch (err) {
       console.error("Camera start failed", err);
       // Most failures (permission denied, no camera, etc.) get a generic
@@ -1279,6 +1586,11 @@
     el.offlineReadyStatus.classList.remove("hidden", "preparing", "ready");
     if (state) el.offlineReadyStatus.classList.add(state);
   }
+
+  // In debug mode, show the panel from page load (not just from the first
+  // voice event), so the build label and Hard refresh button are reachable
+  // on the start screen.
+  ensureVoiceDebugPanel();
 
   if ("serviceWorker" in navigator) {
     setOfflineReadyStatus("preparing", "Preparing offline mode…");

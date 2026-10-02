@@ -61,6 +61,16 @@
       <p id="model-load-progress" class="model-load-progress hidden" role="status"></p>
     </div>
 
+    <!-- Shown after the tab comes back from the background in AR mode. The
+         timer stays paused until it's tapped, and the camera/microphone
+         restart inside that tap — see the visibilitychange handler in ui.js. -->
+    <button id="resume-btn" class="btn btn-primary resume-btn hidden" type="button">Tap to resume</button>
+
+    <!-- AR mode only: restarts the microphone on demand. iOS sometimes
+         leaves a session running but deaf, and the player notices first
+         (their words don't fill the slots). See ui.js. -->
+    <button id="mic-retry-btn" class="mic-retry-btn hidden" type="button">🎤 Not hearing me? Tap</button>
+
     <!-- HUD: timer + score stacked on the left, tries (lives) on the right.
          Same markup is shared by both the normal and AR screens. -->
     <header class="hud">
