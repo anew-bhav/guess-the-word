@@ -510,7 +510,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v27";
+  const BUILD_VERSION = "v28";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -670,6 +670,7 @@
     const testRow = document.createElement("div");
     Object.assign(testRow.style, {
       display: "flex",
+      flexWrap: "wrap",
       gap: "0.4em",
       padding: "0.3em 0.6em",
       borderBottom: "1px solid rgba(255, 255, 255, 0.2)",
@@ -703,6 +704,7 @@
     };
     testRow.appendChild(makeTestBtn("Level test", runMicLevelTest));
     testRow.appendChild(makeTestBtn("Speech test", runSpeechTest));
+    testRow.appendChild(makeTestBtn("Cam + speech test", runCameraSpeechTest));
     voiceDebugEl.appendChild(testRow);
 
     voiceDebugLogEl = document.createElement("pre");
@@ -827,6 +829,39 @@
     Voice.stop();
     unsubscribeDebug();
     debugLog("speech test: done");
+  }
+
+  // Same as runSpeechTest(), but with the camera started first and given
+  // CAMERA_SETTLE_MS — exactly how a camera game used to restart voice
+  // after a resume. If this is silent right after returning to the app
+  // while runSpeechTest() isn't, the camera restart is what breaks speech
+  // recognition on iOS; if both are silent right after returning and both
+  // work ~20s later, it's timing.
+  async function runCameraSpeechTest() {
+    if (typeof Face === "undefined" || typeof Voice === "undefined" || !Voice.supported()) {
+      debugLog("cam + speech test: camera or speech recognition unavailable");
+      return;
+    }
+    if (voiceActive || arModeActive) {
+      debugLog("cam + speech test: stop the camera game first");
+      return;
+    }
+    debugLog("cam + speech test: starting camera");
+    try {
+      await Face.startCamera(el.cameraVideo);
+    } catch (err) {
+      debugLog(`cam + speech test: camera failed: ${(err && err.message) || err}`);
+      return;
+    }
+    debugLog(`cam + speech test: camera live, say a few words after ${CAMERA_SETTLE_MS}ms (${MIC_TEST_MS / 1000}s)`);
+    await debugSleep(CAMERA_SETTLE_MS);
+    const unsubscribeDebug = Voice.onDebugEvent(logVoiceDebugEvent);
+    Voice.start();
+    await debugSleep(MIC_TEST_MS);
+    Voice.stop();
+    unsubscribeDebug();
+    Face.stopCamera();
+    debugLog("cam + speech test: done");
   }
 
   function appendVoiceDebugLine(line) {
