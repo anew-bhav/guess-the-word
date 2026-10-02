@@ -54,10 +54,10 @@
  * and restarts the recognizer if that gap gets too long — independent of
  * whether the dead session ever reports its own death.
  */
-// voice-vosk.js defines window.VoiceVosk when the URL has ?vosk (an
-// on-device recognizer prototype with the same interface); otherwise this
-// browser SpeechRecognition wrapper is used.
-const Voice = window.VoiceVosk || (() => {
+// The browser's SpeechRecognition wrapper. The `Voice` object the rest of
+// the game uses is the facade at the bottom of this file, which prefers the
+// on-device Vosk engine (voice-vosk.js) and falls back to this one.
+const BuiltinVoice = (() => {
   const RecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
   const WATCHDOG_CHECK_MS = 2000;
   // Every (re)start of the recognizer plays an audible system sound in
@@ -464,4 +464,96 @@ const Voice = window.VoiceVosk || (() => {
   }
 
   return { supported, start, stop, warmUp, onResult, onInterimResult, onError, onListeningChange, onSleepChange, onDebugEvent };
+})();
+
+/**
+ * The single voice object the game talks to. Prefers the on-device Vosk
+ * engine (window.VoiceVosk, from voice-vosk.js) and uses BuiltinVoice (the
+ * browser recognizer) when Vosk isn't available or can't start — a failed
+ * model download, or an audio pipeline that stays silent through every
+ * rebuild. Once Vosk fails, the fallback sticks for the rest of the page's
+ * life. Every subscription goes to both engines, so callers never need to
+ * know which one is running.
+ */
+const Voice = (() => {
+  const vosk = window.VoiceVosk && window.VoiceVosk.supported() ? window.VoiceVosk : null;
+  let active = vosk || BuiltinVoice;
+  const errorCallbacks = [];
+  const debugCallbacks = [];
+
+  const subscribeBoth = (method) => (callback) => {
+    const unsubscribers = [BuiltinVoice[method](callback)];
+    if (vosk) unsubscribers.push(vosk[method](callback));
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe && unsubscribe());
+  };
+
+  function debug(type, detail) {
+    debugCallbacks.forEach((callback) => callback({ type, detail }));
+  }
+
+  function useFallback(reason) {
+    active = BuiltinVoice;
+    debug("engine", `browser recognizer (${reason})`);
+    BuiltinVoice.start();
+  }
+
+  if (vosk) {
+    vosk.onError((error) => {
+      if ((error === "start-failed" || error === "unsupported") && active === vosk && BuiltinVoice.supported()) {
+        useFallback(error);
+        return; // handled — the caller never sees Vosk's failure
+      }
+      errorCallbacks.forEach((callback) => callback(error));
+    });
+    BuiltinVoice.onError((error) => errorCallbacks.forEach((callback) => callback(error)));
+  }
+
+  return {
+    supported: () => !!vosk || BuiltinVoice.supported(),
+    // Vosk keeps listening after the player leaves and returns to the app
+    // (once restarted); the browser recognizer, on iPhone, doesn't recover
+    // for ~20s — ui.js uses this to choose between keeping camera mode and
+    // switching to typing when the app is left.
+    survivesAppSwitch: () => active === vosk,
+    engine: () => (active === vosk ? "vosk" : "browser"),
+    start: () => active.start(),
+    stop: () => {
+      BuiltinVoice.stop();
+      if (vosk) vosk.stop();
+    },
+    prime: () => {
+      if (vosk) vosk.prime();
+    },
+    preload: () => {
+      if (vosk) vosk.preload();
+    },
+    warmUp: () => (active.warmUp ? active.warmUp() : Promise.resolve()),
+    onResult: subscribeBoth("onResult"),
+    onInterimResult: subscribeBoth("onInterimResult"),
+    onListeningChange: subscribeBoth("onListeningChange"),
+    onSleepChange: subscribeBoth("onSleepChange"),
+    // (state, fraction): "idle" | "loading" | "ready" | "failed" — Vosk's model download.
+    onModelState: (callback) => (vosk ? vosk.onModelState(callback) : (callback("ready", 1), () => {})),
+    onError: (callback) => {
+      if (!vosk) return BuiltinVoice.onError(callback);
+      errorCallbacks.push(callback);
+      return () => {
+        const index = errorCallbacks.indexOf(callback);
+        if (index >= 0) errorCallbacks.splice(index, 1);
+      };
+    },
+    onDebugEvent: (callback) => {
+      debugCallbacks.push(callback);
+      const unsubscribers = [BuiltinVoice.onDebugEvent(callback)];
+      if (vosk) {
+        unsubscribers.push(vosk.onDebugEvent(callback));
+        callback({ type: "engine", detail: active === vosk ? "vosk" : "browser recognizer" });
+      }
+      return () => {
+        const index = debugCallbacks.indexOf(callback);
+        if (index >= 0) debugCallbacks.splice(index, 1);
+        unsubscribers.forEach((unsubscribe) => unsubscribe && unsubscribe());
+      };
+    },
+  };
 })();

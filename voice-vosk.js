@@ -1,36 +1,53 @@
 /**
- * Design Chain — on-device speech recognition prototype (Vosk).
+ * Design Chain — on-device speech recognition (Vosk).
  *
- * Opt-in only: active when the URL has ?vosk (or ?vosk=grammar). It then
- * defines window.VoiceVosk, which voice.js uses in place of the browser's
- * SpeechRecognition — same interface (supported, start, stop, warmUp,
- * onResult, onInterimResult, onError, onListeningChange, onSleepChange,
- * onDebugEvent), plus prime(), so nothing else in the game changes.
+ * The default voice engine in camera mode where the browser supports it.
+ * Defines window.VoiceVosk, which voice.js combines with the browser's
+ * SpeechRecognition wrapper (see its facade): Vosk is used first, and the
+ * browser recognizer is the backup if Vosk can't start. Same interface as
+ * voice.js — supported, start, stop, warmUp, onResult, onInterimResult,
+ * onError, onListeningChange, onSleepChange, onDebugEvent — plus prime(),
+ * preload(), onModelState().
  *
  * Why: on iPhone, Safari's speech recognizer stays deaf for ~20s after the
  * player leaves the app, while the raw getUserMedia microphone comes back
- * much sooner (v27/v30 diagnostics). Vosk runs a Kaldi model in a
- * WebAssembly worker on the raw microphone, so it should survive an app
- * switch. It also never plays Chrome's start sound on Android, since there
- * are no recognizer restarts.
+ * within a second. Vosk runs a Kaldi model in a WebAssembly worker on the
+ * raw microphone, so it survives an app switch. It also never plays
+ * Chrome's start sound on Android, since there are no recognizer restarts.
  *
  * Pieces: vendor/vosk.js (vosk-browser 0.0.8, which bundles its worker) and
  * models/vosk-model-small-en-us-0.15.tar.gz (~41MB, the official small
- * English model repacked as tar.gz). The model starts loading as soon as
- * the page loads; the service worker caches it on first use.
+ * English model repacked as tar.gz). The model downloads lazily — on
+ * preload(), which ui.js calls once camera mode is on — through the page's
+ * own fetch, so it goes via the service worker's cache (works offline
+ * afterwards) and reports progress. It's handed to Vosk as a blob URL.
  *
- * ?vosk=grammar restricts recognition to the game's own vocabulary (every
- * word of every non-AI term, plus "[unk]" for anything else), which should
- * be much more accurate for a word game. Words the model doesn't know are
- * skipped by Vosk (with a console warning).
+ * Recognition is restricted to the game's own vocabulary (every word of
+ * every non-AI term, plus "[unk]" for anything else): far more accurate for
+ * a word game than free dictation, which turned "line" into "elaine".
+ * URL flags for debugging: ?vosk=plain (free dictation), ?vosk=off (use
+ * the browser recognizer only).
+ *
+ * Self-check: iOS can leave a freshly connected audio graph silently dead,
+ * so each connection is watched and rebuilt if no audio arrives — see
+ * connectPipeline().
  */
 (() => {
   const params = new URLSearchParams(location.search);
-  if (!params.has("vosk")) return;
+  const voskFlag = params.get("vosk");
+  if (voskFlag === "off") return;
+  // Needs WebAssembly, workers and the Web Audio API on top of the
+  // microphone; otherwise leave voice to the browser recognizer.
+  const hasRequirements =
+    typeof WebAssembly === "object" &&
+    typeof Worker === "function" &&
+    !!(window.AudioContext || window.webkitAudioContext) &&
+    !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  if (!hasRequirements) return;
 
   const MODEL_URL = "models/vosk-model-small-en-us-0.15.tar.gz";
   const LIBRARY_URL = "vendor/vosk.js";
-  const USE_GRAMMAR = params.get("vosk") === "grammar";
+  const USE_GRAMMAR = voskFlag !== "plain";
 
   let resultCallbacks = [];
   let interimCallbacks = [];
@@ -90,25 +107,67 @@
     });
   }
 
+  // "idle" | "loading" | "ready" | "failed", plus a 0–1 download fraction.
+  let modelState = "idle";
+  let modelFraction = 0;
+  let modelStateCallbacks = [];
+  function setModelState(state, fraction) {
+    modelState = state;
+    if (typeof fraction === "number") modelFraction = fraction;
+    emit(modelStateCallbacks, modelState, modelFraction);
+  }
+
+  // Downloads the model through the page's fetch (so the service worker
+  // caches it and reports progress) and returns a blob URL for Vosk.
+  async function fetchModelBlobUrl() {
+    const response = await fetch(MODEL_URL);
+    if (!response.ok) throw new Error(`model download failed (${response.status})`);
+    const total = Number(response.headers.get("Content-Length")) || 0;
+    if (!response.body || !response.body.getReader) {
+      setModelState("loading", 0.5);
+      return URL.createObjectURL(await response.blob());
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+    let lastReported = -1;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      const fraction = total ? Math.min(received / total, 1) : 0;
+      if (Math.floor(fraction * 100) !== lastReported) {
+        lastReported = Math.floor(fraction * 100);
+        setModelState("loading", fraction);
+      }
+    }
+    return URL.createObjectURL(new Blob(chunks));
+  }
+
   function loadModel() {
     if (modelPromise) return modelPromise;
     const startedAt = performance.now();
     emitDebugEvent("vosk-model", "loading");
+    setModelState("loading", 0);
     modelPromise = loadLibrary()
-      .then(() => window.Vosk.createModel(MODEL_URL))
+      .then(fetchModelBlobUrl)
+      .then((blobUrl) => window.Vosk.createModel(blobUrl))
       .then((model) => {
         emitDebugEvent("vosk-model", `ready in ${((performance.now() - startedAt) / 1000).toFixed(1)}s`);
+        setModelState("ready", 1);
         return model;
       })
       .catch((err) => {
         emitDebugEvent("vosk-model", `failed: ${(err && err.message) || err}`);
         modelPromise = null; // allow a retry on the next start()
+        setModelState("failed");
         throw err;
       });
     return modelPromise;
   }
 
-  // The game's vocabulary for ?vosk=grammar.
+  // The game's vocabulary (see the header).
   function buildGrammar() {
     const words = new Set();
     (typeof DESIGN_TERMS !== "undefined" ? DESIGN_TERMS : [])
@@ -303,6 +362,17 @@
     start,
     stop,
     prime,
+    // Starts the model download early (ui.js calls this once camera mode is
+    // on) so it's ready, or at least progressing, by the time Play is pressed.
+    preload: () => {
+      loadModel().catch((err) => console.error("VoiceVosk: model load failed", err));
+    },
+    // (state, fraction) — called immediately with the current state, then on every change.
+    onModelState: (callback) => {
+      const unsubscribe = subscribe(modelStateCallbacks, callback);
+      callback(modelState, modelFraction);
+      return unsubscribe;
+    },
     warmUp: async () => {}, // not needed — Vosk reads the raw microphone directly
     onResult: (callback) => subscribe(resultCallbacks, callback),
     onInterimResult: (callback) => subscribe(interimCallbacks, callback),
@@ -319,8 +389,4 @@
     },
   };
 
-  // Start downloading the model right away so it's ready by the time the
-  // player presses Play (debug events before the panel subscribes go to
-  // the console only).
-  loadModel().catch((err) => console.error("VoiceVosk: model load failed", err));
 })();

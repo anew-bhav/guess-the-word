@@ -58,6 +58,7 @@
       <video id="camera-video" class="camera-video" playsinline muted></video>
       <p id="move-into-frame-hint" class="move-into-frame hidden">Move into frame</p>
       <p id="model-load-progress" class="model-load-progress hidden" role="status"></p>
+      <p id="voice-load-progress" class="model-load-progress voice-load-progress hidden" role="status"></p>
     </div>
 
     <!-- Shown when the player comes back after leaving the app mid-camera-game.
@@ -128,7 +129,7 @@
           <span>Play in camera mode (AR)</span>
         </label>
         <p class="camera-privacy-note">Video is processed only on your device and is never uploaded.</p>
-        <p class="camera-privacy-note">Voice works best if you stay in the game — leaving the app switches you to typing.</p>
+        <p class="camera-privacy-note">Camera mode downloads a one-time ~40MB voice engine, so answers are recognized on your device.</p>
 
         <button id="play-btn" class="btn btn-primary" type="button">Play</button>
       </div>

@@ -569,6 +569,10 @@ button {
 /* Small, non-blocking indicator while the face-tracking model downloads in
    the background (Phase 4) — gameplay and the camera view are never gated
    on this, so it's deliberately a quiet corner note, not a loading screen. */
+.voice-load-progress {
+  top: 3rem; /* below the face-tracking progress note, in case both show */
+}
+
 .model-load-progress {
   position: absolute;
   top: 0.75rem;

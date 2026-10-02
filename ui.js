@@ -68,6 +68,7 @@
     switchToTypingBtn: document.getElementById("switch-to-typing-btn"),
     tapToSpeakBtn: document.getElementById("tap-to-speak-btn"),
     modelLoadProgress: document.getElementById("model-load-progress"),
+    voiceLoadProgress: document.getElementById("voice-load-progress"),
     cameraToggleInput: document.getElementById("camera-toggle-input"),
     cameraStatusPanel: document.getElementById("camera-status-panel"),
     cameraStatusMessage: document.getElementById("camera-status-message"),
@@ -511,7 +512,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v32";
+  const BUILD_VERSION = "v33";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -600,12 +601,7 @@
       color: "#9a9a9a",
     });
     const title = document.createElement("span");
-    // Read directly (not RESUME_TEST, which is declared further down and not
-    // yet initialized when the panel is built at page load).
-    const debugParams = new URLSearchParams(location.search);
-    const resumeTestOn = debugParams.has("resumetest") || debugParams.has("vosk");
-    const voskLabel = debugParams.has("vosk") ? ` · vosk${debugParams.get("vosk") === "grammar" ? " (grammar)" : ""}` : "";
-    title.textContent = `voice debug · ${BUILD_VERSION}${voskLabel}${resumeTestOn ? " · resume test" : ""}`;
+    title.textContent = `voice debug · ${BUILD_VERSION}`;
     header.appendChild(title);
 
     voiceDebugCopyBtn = document.createElement("button");
@@ -671,48 +667,6 @@
     header.appendChild(controls);
     voiceDebugEl.appendChild(header);
 
-    // Second row: microphone diagnostics — see runMicLevelTest() and
-    // runSpeechTest().
-    const testRow = document.createElement("div");
-    Object.assign(testRow.style, {
-      display: "flex",
-      flexWrap: "wrap",
-      gap: "0.4em",
-      padding: "0.3em 0.6em",
-      borderBottom: "1px solid rgba(255, 255, 255, 0.2)",
-    });
-    const makeTestBtn = (label, run) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = label;
-      Object.assign(btn.style, {
-        pointerEvents: "auto",
-        font: "inherit",
-        color: "#fff",
-        background: "#5b4bb7",
-        border: "none",
-        borderRadius: "4px",
-        padding: "0.3em 0.7em",
-        cursor: "pointer",
-      });
-      btn.addEventListener("click", async () => {
-        if (btn.disabled) return;
-        btn.disabled = true;
-        btn.textContent = `${label}…`;
-        try {
-          await run();
-        } finally {
-          btn.disabled = false;
-          btn.textContent = label;
-        }
-      });
-      return btn;
-    };
-    testRow.appendChild(makeTestBtn("Level test", runMicLevelTest));
-    testRow.appendChild(makeTestBtn("Speech test", runSpeechTest));
-    testRow.appendChild(makeTestBtn("Cam + speech test", runCameraSpeechTest));
-    voiceDebugEl.appendChild(testRow);
-
     voiceDebugLogEl = document.createElement("pre");
     Object.assign(voiceDebugLogEl.style, {
       margin: "0",
@@ -755,119 +709,6 @@
     const url = new URL(location.href);
     url.searchParams.set("refresh", Date.now()); // a new URL, so nothing serves the page from a cache
     location.replace(url.toString());
-  }
-
-  // ---------- Microphone diagnostics (debug only) ----------
-  // After leaving the app on iPhone, Safari's speech recognizer starts but
-  // hears nothing. These two tests separate "the phone's microphone gives
-  // the page no sound" (no web-based recognizer could help) from "the mic
-  // works but Safari's recognizer doesn't" (an on-device recognizer such as
-  // Vosk would fix it). Run each before and after leaving the app.
-  const MIC_TEST_MS = 8000;
-  const debugSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const debugLog = (text) => appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◆ ${text}`);
-
-  // Opens a plain getUserMedia audio stream and logs its loudness once a
-  // second (peak and average RMS, 0–1). Talking should push the peak well
-  // above the silent baseline (typically under 0.01).
-  async function runMicLevelTest() {
-    if (voiceActive) {
-      debugLog("level test: stop the camera game first (voice is using the mic)");
-      return;
-    }
-    debugLog(`level test: talk now (${MIC_TEST_MS / 1000}s)`);
-    let stream = null;
-    let audioContext = null;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const track = stream.getAudioTracks()[0];
-      debugLog(`level test: track "${track.label}" readyState=${track.readyState} muted=${track.muted} enabled=${track.enabled}`);
-      track.onmute = () => debugLog("level test: track muted");
-      track.onunmute = () => debugLog("level test: track unmuted");
-
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      audioContext = new AudioCtx();
-      await audioContext.resume();
-      debugLog(`level test: audio context ${audioContext.state}`);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 2048;
-      audioContext.createMediaStreamSource(stream).connect(analyser);
-      const samples = new Float32Array(analyser.fftSize);
-
-      for (let second = 1; second <= MIC_TEST_MS / 1000; second++) {
-        let peak = 0;
-        let sum = 0;
-        for (let tick = 0; tick < 10; tick++) {
-          await debugSleep(100);
-          analyser.getFloatTimeDomainData(samples);
-          let squares = 0;
-          for (let i = 0; i < samples.length; i++) squares += samples[i] * samples[i];
-          const rms = Math.sqrt(squares / samples.length);
-          peak = Math.max(peak, rms);
-          sum += rms;
-        }
-        debugLog(`level ${second}s: peak ${peak.toFixed(4)}  avg ${(sum / 10).toFixed(4)}`);
-      }
-      debugLog("level test: done");
-    } catch (err) {
-      debugLog(`level test failed: ${(err && err.name) || err} ${(err && err.message) || ""}`);
-    } finally {
-      if (stream) stream.getTracks().forEach((track) => track.stop());
-      if (audioContext) audioContext.close().catch(() => {});
-    }
-  }
-
-  // Runs Safari's/Chrome's speech recognizer alone (no game) and logs
-  // everything it reports, for comparison with the level test.
-  async function runSpeechTest() {
-    if (typeof Voice === "undefined" || !Voice.supported()) {
-      debugLog("speech test: speech recognition not supported here");
-      return;
-    }
-    if (voiceActive) {
-      debugLog("speech test: stop the camera game first (voice is already running)");
-      return;
-    }
-    debugLog(`speech test: say a few words (${MIC_TEST_MS / 1000}s)`);
-    const unsubscribeDebug = Voice.onDebugEvent(logVoiceDebugEvent);
-    Voice.start();
-    await debugSleep(MIC_TEST_MS);
-    Voice.stop();
-    unsubscribeDebug();
-    debugLog("speech test: done");
-  }
-
-  // Same as runSpeechTest(), but with the camera started first and given
-  // CAMERA_SETTLE_MS — exactly how a camera game used to restart voice
-  // after a resume. If this is silent right after returning to the app
-  // while runSpeechTest() isn't, the camera restart is what breaks speech
-  // recognition on iOS; if both are silent right after returning and both
-  // work ~20s later, it's timing.
-  async function runCameraSpeechTest() {
-    if (typeof Face === "undefined" || typeof Voice === "undefined" || !Voice.supported()) {
-      debugLog("cam + speech test: camera or speech recognition unavailable");
-      return;
-    }
-    if (voiceActive || arModeActive) {
-      debugLog("cam + speech test: stop the camera game first");
-      return;
-    }
-    debugLog("cam + speech test: starting camera");
-    try {
-      await Face.startCamera(el.cameraVideo);
-    } catch (err) {
-      debugLog(`cam + speech test: camera failed: ${(err && err.message) || err}`);
-      return;
-    }
-    debugLog(`cam + speech test: camera live, say a few words after ${CAMERA_SETTLE_MS}ms (${MIC_TEST_MS / 1000}s)`);
-    await debugSleep(CAMERA_SETTLE_MS);
-    const unsubscribeDebug = Voice.onDebugEvent(logVoiceDebugEvent);
-    Voice.start();
-    await debugSleep(MIC_TEST_MS);
-    Voice.stop();
-    unsubscribeDebug();
-    Face.stopCamera();
-    debugLog("cam + speech test: done");
   }
 
   function appendVoiceDebugLine(line) {
@@ -944,9 +785,45 @@
   const isSlowConnection = !!(conn && (conn.saveData || /^2g|3g$/.test(conn.effectiveType || "")));
   if (isSlowConnection) cameraEnabled = false;
   el.cameraToggleInput.checked = cameraEnabled;
+  // The on-device voice engine (~40MB, first time only) starts downloading
+  // as soon as camera mode is on, so it's usually ready by the time Play is
+  // pressed. Typing-only players never download it. If Play comes first,
+  // the round waits (timer paused) with a progress note and a "Switch to
+  // typing" option — see refreshVoiceLoadUi().
+  function preloadVoiceEngine() {
+    if (cameraEnabled && typeof Voice !== "undefined") Voice.preload();
+  }
+
+  let voiceModelState = "idle";
+  let voiceModelFraction = 0;
+  let voiceLoadOffered = false; // the typing pill is showing because of the download
+
+  function refreshVoiceLoadUi() {
+    const loading = voiceModelState === "loading" && arModeActive;
+    el.voiceLoadProgress.textContent = `Loading voice engine… ${Math.round(voiceModelFraction * 100)}%`;
+    el.voiceLoadProgress.classList.toggle("hidden", !loading);
+    if (loading && voiceActive) {
+      voiceLoadOffered = true;
+      setSwitchToTypingOffered(true);
+    } else if (voiceLoadOffered && !loading) {
+      voiceLoadOffered = false;
+      if (!voiceHeardThisSession && !voiceSilenceTimer) setSwitchToTypingOffered(false);
+    }
+  }
+
+  if (typeof Voice !== "undefined") {
+    Voice.onModelState((state, fraction) => {
+      voiceModelState = state;
+      voiceModelFraction = fraction;
+      refreshVoiceLoadUi();
+    });
+  }
+  preloadVoiceEngine();
+
   el.cameraToggleInput.addEventListener("change", () => {
     cameraEnabled = el.cameraToggleInput.checked;
     saveCameraPreference(cameraEnabled);
+    preloadVoiceEngine();
   });
 
   function showCameraStatus(message, { offerFallback = false } = {}) {
@@ -1085,6 +962,7 @@
 
   function activateArMode() {
     arModeActive = true;
+    refreshVoiceLoadUi();
     faceTarget = null;
     cardCurrent = { x: null, y: null, scale: 1 };
     lastFaceSeenAt = performance.now(); // grace period before "no face" can trigger
@@ -1136,6 +1014,7 @@
   function deactivateArMode() {
     if (!arModeActive) return;
     arModeActive = false;
+    refreshVoiceLoadUi();
     if (arRafId) {
       cancelAnimationFrame(arRafId);
       arRafId = null;
@@ -1193,7 +1072,7 @@
     voiceSettleTimer = setTimeout(async () => {
       voiceSettleTimer = null;
       if (!arModeActive || document.hidden) return;
-      if (typeof Voice !== "undefined" && typeof Voice.warmUp === "function") await Voice.warmUp();
+      if (typeof Voice !== "undefined") await Voice.warmUp();
       if (!arModeActive || document.hidden) return;
       startVoiceInput();
     }, CAMERA_SETTLE_MS);
@@ -1203,6 +1082,7 @@
     if (typeof Voice === "undefined" || !Voice.supported()) return false;
 
     voiceActive = true;
+    refreshVoiceLoadUi();
     unsubscribeVoiceResult = Voice.onResult(handleVoiceResult);
     unsubscribeVoiceInterim = Voice.onInterimResult(handleVoiceInterimResult);
     unsubscribeVoiceError = Voice.onError(handleVoiceError);
@@ -1567,62 +1447,44 @@
     // ui.js to do here.
   }
 
-  // Leaving the app ends camera mode for the rest of this game. On iPhone,
-  // speech recognition never reliably came back after the page had been in
-  // the background (camera-first restarts, restart gaps, keeping the
-  // session alive and a microphone warm-up all failed on a real device), so
-  // the switch to typing happens the moment the page is hidden — while the
-  // player can't see the layout change — and they return to a "Paused"
-  // card explaining it. "Keep playing" resumes the timer and focuses the
-  // input inside the tap, which is what lets iOS open the keyboard.
-  // Applied on every device for consistency (Android is untested).
-  // Experiment (?resumetest): stay in camera mode across leaving the app —
-  // the camera is left running (never stopped or restarted), only the
-  // microphone is stopped and then restarted by the "Keep playing" tap.
-  // The v27 diagnostic showed the mic and recognizer both work after a
-  // switch, so this checks whether the old camera restart was what
-  // silenced voice. Regular players keep the switch-to-typing behavior.
-  // Also on with ?vosk: the on-device recognizer is expected to survive an
-  // app switch, so the switch keeps camera mode and restarts voice the
-  // same way.
-  const RESUME_TEST = new URLSearchParams(location.search).has("resumetest") || new URLSearchParams(location.search).has("vosk");
-  let resumeTestPending = false; // camera mode kept across a switch; voice restarts on "Keep playing"
-
-  function logCameraState(when) {
-    const video = el.cameraVideo;
-    const track = video && video.srcObject && video.srcObject.getVideoTracks ? video.srcObject.getVideoTracks()[0] : null;
-    appendVoiceDebugLine(
-      `+${voiceDebugElapsedSeconds()}s  ◇ camera ${when}: video paused=${video ? video.paused : "n/a"} readyState=${video ? video.readyState : "n/a"}` +
-        (track ? ` track readyState=${track.readyState} muted=${track.muted}` : " no track")
-    );
-  }
+  // Leaving the app mid-camera-game. What happens depends on the voice
+  // engine (Voice.survivesAppSwitch()):
+  //
+  // - On-device Vosk: camera mode is kept. The camera is left alone (iOS
+  //   interrupts it while away and resumes it on its own), only voice is
+  //   stopped, and "Keep playing" restarts it inside the tap — on iPhone the
+  //   AudioContext has to be resumed from a gesture. Voice is heard again
+  //   within a second.
+  // - Browser recognizer (the fallback): on iPhone it stays deaf for ~20s
+  //   after the app has been in the background, whatever the page does
+  //   (camera-first restarts, restart gaps, keeping the session alive and a
+  //   microphone warm-up all failed). So the switch to typing happens the
+  //   moment the page is hidden — while the player can't see the layout
+  //   change — and they return to a card explaining it.
+  //
+  // Either way the timer is paused until "Keep playing", and the card is
+  // shown on return. Focusing the input inside the tap is what lets iOS
+  // open the keyboard in the typing case.
+  const RESUME_COPY_KEEP_CAMERA = "Tap to keep going — voice restarts when you do.";
+  const RESUME_COPY_TYPING = "Voice answers stop when you leave the app. You can keep playing by typing.";
+  let resumeKeepsCamera = false; // set while away: "Keep playing" restarts voice instead of focusing the input
 
   document.addEventListener("visibilitychange", () => {
-    if (RESUME_TEST && document.hidden && arModeActive) {
-      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab hidden (resume test: camera kept, mic stopped)`);
-      pausedForResumeCard = true;
-      resumeTestPending = true;
-      updatePauseState();
-      clearPendingVoiceSubmit();
-      stopVoiceInput();
-      return;
-    }
-    if (RESUME_TEST && !document.hidden && resumeTestPending) {
-      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab visible again — pause card (resume test)`);
-      logCameraState("on return");
-      el.resumeBody.textContent = "Voice restarts when you continue.";
-      el.resumeCard.classList.remove("hidden");
-      el.resumeBtn.focus();
-      return;
-    }
     if (document.hidden) {
       if (!arModeActive) return;
-      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab hidden`);
-      pausedForResumeCard = true; // first, so the timer never runs between the switch and the pause
+      pausedForResumeCard = true; // first, so the timer never runs between leaving and the pause
       clearPendingVoiceSubmit();
-      switchToTypingMode();
+      resumeKeepsCamera = typeof Voice !== "undefined" && Voice.survivesAppSwitch();
+      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab hidden (${resumeKeepsCamera ? "camera mode kept, voice stopped" : "switching to typing"})`);
+      if (resumeKeepsCamera) {
+        updatePauseState();
+        stopVoiceInput();
+      } else {
+        switchToTypingMode();
+      }
     } else if (pausedForResumeCard) {
       appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab visible again — pause card`);
+      el.resumeBody.textContent = resumeKeepsCamera ? RESUME_COPY_KEEP_CAMERA : RESUME_COPY_TYPING;
       el.resumeCard.classList.remove("hidden");
       el.resumeBtn.focus();
     }
@@ -1632,17 +1494,15 @@
     el.resumeCard.classList.add("hidden");
     pausedForResumeCard = false;
     appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ keep playing tapped`);
-    if (resumeTestPending) {
-      resumeTestPending = false;
-      if (arModeActive) {
-        logCameraState("at tap");
-        if (el.cameraVideo.paused) el.cameraVideo.play().catch(() => {}); // in case iOS paused the element
-        if (typeof Voice.prime === "function") Voice.prime(); // ?vosk: resume the AudioContext inside the tap
-        startVoiceInput(); // inside the tap; no camera restart, no warm-up
-        updatePauseState();
-        return;
-      }
+    if (resumeKeepsCamera && arModeActive) {
+      resumeKeepsCamera = false;
+      if (el.cameraVideo.paused) el.cameraVideo.play().catch(() => {}); // in case iOS paused the element
+      Voice.prime(); // resume the AudioContext inside the tap
+      startVoiceInput();
+      updatePauseState();
+      return;
     }
+    resumeKeepsCamera = false;
     updatePauseState();
     el.guessInput.focus();
   });
@@ -1687,7 +1547,7 @@
   function startNewGame() {
     // The on-device recognizer prototype (?vosk) needs its AudioContext
     // started inside this tap on iOS; the browser recognizer doesn't.
-    if (cameraEnabled && typeof Voice !== "undefined" && typeof Voice.prime === "function") Voice.prime();
+    if (cameraEnabled && typeof Voice !== "undefined") Voice.prime();
     if (cameraEnabled) startWithCamera();
     else beginRound();
   }
