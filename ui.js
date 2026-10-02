@@ -62,9 +62,9 @@
     arLayer: document.getElementById("ar-layer"),
     cameraVideo: document.getElementById("camera-video"),
     moveIntoFrameHint: document.getElementById("move-into-frame-hint"),
-    voiceReconnectingHint: document.getElementById("voice-reconnecting-hint"),
+    resumeCard: document.getElementById("resume-card"),
     resumeBtn: document.getElementById("resume-btn"),
-    micRetryBtn: document.getElementById("mic-retry-btn"),
+    switchToTypingBtn: document.getElementById("switch-to-typing-btn"),
     modelLoadProgress: document.getElementById("model-load-progress"),
     cameraToggleInput: document.getElementById("camera-toggle-input"),
     cameraStatusPanel: document.getElementById("camera-status-panel"),
@@ -289,7 +289,6 @@
 
   function showChainToast() {
     clearTimeout(toastTimer);
-    el.chainToast.textContent = "New chain!";
     el.chainToast.classList.add("show");
     announce("New chain! " + activeSecondWord.charAt(0).toUpperCase() + " blank.");
     toastTimer = setTimeout(() => el.chainToast.classList.remove("show"), CHAIN_TOAST_MS);
@@ -473,12 +472,12 @@
   let lastFaceSeenAt = 0;
   let arRafId = null;
   let pausedByNoFace = false;
-  let pausedByTabHidden = false;
   let pausedByVoiceNotListening = false;
-  // After "Tap to resume", the timer stays paused until the microphone
-  // actually hears something — see beginResumeSpeechCheck().
-  let pausedAwaitingSpeech = false;
-  // Switching to typing when the microphone goes silent — see switchToTypingMode().
+  // Set when the player left the app mid-camera-game; the timer stays paused
+  // until they tap "Keep playing" on the pause card — see the
+  // visibilitychange handler.
+  let pausedForResumeCard = false;
+  // "Switch to typing" offer — see handleVoiceSilence().
   let voiceSilenceTimer = null;
   let voiceHeardThisSession = false;
 
@@ -507,7 +506,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v23";
+  const BUILD_VERSION = "v24";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -887,7 +886,7 @@
   function updatePauseState() {
     const state = Game.getState();
     if (!state) return;
-    const shouldPause = pausedByNoFace || pausedByTabHidden || pausedByVoiceNotListening || pausedAwaitingSpeech;
+    const shouldPause = pausedByNoFace || pausedByVoiceNotListening || pausedForResumeCard;
     if (shouldPause && !state.paused) Game.pauseTimer();
     else if (!shouldPause && state.paused) Game.resumeTimer();
   }
@@ -1002,15 +1001,12 @@
     el.modelLoadProgress.classList.add("hidden");
     el.guessForm.classList.remove("hidden"); // restore typing for non-AR play
     voiceHeardThisSession = false;
-    nextSilenceCheckMs = SILENCE_NEW_SESSION_MS;
-    el.resumeBtn.classList.add("hidden");
+    el.switchToTypingBtn.classList.add("hidden");
     clearTimeout(voiceSettleTimer);
     voiceSettleTimer = null;
 
     pausedByNoFace = false;
-    pausedByTabHidden = false;
     pausedByVoiceNotListening = false;
-    pausedAwaitingSpeech = false;
     clearVoiceSilenceTimer();
   }
 
@@ -1021,16 +1017,12 @@
   // supported or the player denies microphone access; see announce() calls
   // below for the (non-visual, screen-reader only) reporting of that case.
   // Starts voice input once the camera has had CAMERA_SETTLE_MS to settle
-  // (see that constant). The timer is paused and the "Reconnecting
-  // microphone…" hint shown for the wait, the same way startVoiceInput()
-  // handles waiting for the microphone itself.
-  // Also warms up the microphone first (Voice.warmUp()) — iOS leaves a
-  // page's microphone muted after it's been in the background, and on a
-  // fresh load after a reload. onStarted runs right after voice starts.
-  function startVoiceInputAfterCameraSettles(onStarted) {
+  // (see that constant), warming up the microphone first (Voice.warmUp()).
+  // The timer is held, silently, for the wait — a normal ~1s startup isn't
+  // worth a message.
+  function startVoiceInputAfterCameraSettles() {
     clearTimeout(voiceSettleTimer);
     pausedByVoiceNotListening = true;
-    refreshVoiceHint();
     updatePauseState();
     voiceSettleTimer = setTimeout(async () => {
       voiceSettleTimer = null;
@@ -1038,7 +1030,6 @@
       if (typeof Voice !== "undefined" && typeof Voice.warmUp === "function") await Voice.warmUp();
       if (!arModeActive || document.hidden) return;
       startVoiceInput();
-      if (onStarted) onStarted();
     }, CAMERA_SETTLE_MS);
   }
 
@@ -1063,7 +1054,6 @@
     // anything about. handleVoiceListeningChange() below clears this the
     // moment Voice confirms it's actually listening.
     pausedByVoiceNotListening = true;
-    refreshVoiceHint();
     updatePauseState();
 
     Voice.start();
@@ -1071,49 +1061,16 @@
     return true;
   }
 
-  // One hint pill, two messages: waiting on the microphone itself takes
-  // priority over waiting for the player's first words after a resume.
-  // Also owns the mic retry button: shown whenever voice is the live input,
-  // hidden while the player is away or the resume button is up.
-  function refreshVoiceHint() {
-    el.micRetryBtn.classList.toggle("hidden", !(voiceActive && arModeActive && !pausedByTabHidden));
-    const hint = el.voiceReconnectingHint;
-    const hintAllowed = arModeActive && !pausedByTabHidden;
-    if (hintAllowed && pausedByVoiceNotListening) {
-      hint.textContent = "Reconnecting microphone…";
-      hint.classList.remove("hidden");
-    } else if (hintAllowed && pausedAwaitingSpeech) {
-      hint.textContent = "Say your answer to continue";
-      hint.classList.remove("hidden");
-    } else {
-      hint.classList.add("hidden");
-    }
-  }
-
-  // Typing fallback. On iOS Safari, speech recognition regularly goes
-  // silent after the tab has been in the background: sessions start
-  // (`start`, `audiostart`) but get no audio, restarts don't help, and it
-  // only recovers on its own after ~20s. Every fix tried (camera-first
-  // ordering, restart gaps, keeping the session alive, a getUserMedia
-  // microphone warm-up) failed on a real iPhone. A silent session can't be
-  // detected directly — only by hearing nothing — so: if a microphone
-  // session hears nothing within a short window, the game leaves camera
-  // mode and continues in typing mode (switchToTypingMode()).
-  //
-  // Windows: after a resume or a mic retry tap the player is about to
-  // speak, so 3s (the timer is frozen meanwhile); for any other new
-  // session, including game start, 8s (the timer runs meanwhile).
-  const SILENCE_AFTER_RESUME_MS = 3000;
+  // "Switch to typing" is offered — never forced — once the current
+  // microphone session has heard nothing for SILENCE_NEW_SESSION_MS. That
+  // can mean a silent session (seen on iPhones at game start) or just a
+  // player thinking, so the player decides. Hidden again as soon as the
+  // microphone hears anything. (Leaving the app is handled separately: it
+  // always switches to typing — see the visibilitychange handler.)
   const SILENCE_NEW_SESSION_MS = 8000;
-  const SWITCH_TO_TYPING_TOAST_MS = 3500;
-  let nextSilenceCheckMs = SILENCE_NEW_SESSION_MS;
 
-  function beginResumeSpeechCheck() {
-    pausedAwaitingSpeech = true;
-    nextSilenceCheckMs = SILENCE_AFTER_RESUME_MS; // used when the new session confirms it's listening
-    refreshVoiceHint();
-    updatePauseState();
-    armVoiceSilenceTimer(SILENCE_AFTER_RESUME_MS);
+  function setSwitchToTypingOffered(offered) {
+    el.switchToTypingBtn.classList.toggle("hidden", !(offered && voiceActive && arModeActive));
   }
 
   function armVoiceSilenceTimer(ms) {
@@ -1128,47 +1085,34 @@
 
   function handleVoiceSilence() {
     voiceSilenceTimer = null;
-    if (!voiceActive || !arModeActive || pausedByTabHidden || voiceHeardThisSession) return;
-    switchToTypingMode();
+    if (!voiceActive || !arModeActive || voiceHeardThisSession) return;
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ nothing heard for ${SILENCE_NEW_SESSION_MS / 1000}s — offering typing`);
+    setSwitchToTypingOffered(true);
   }
 
   // Any interim or final transcript: this session can hear the player.
   function noteVoiceHeard() {
     clearVoiceSilenceTimer();
     voiceHeardThisSession = true;
-    if (pausedAwaitingSpeech) {
-      pausedAwaitingSpeech = false;
-      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ speech heard, timer resumed`);
-      updatePauseState();
-    }
-    refreshVoiceHint();
+    setSwitchToTypingOffered(false);
   }
 
   // Leaves camera mode for the rest of this game and continues it in the
   // regular typing layout (camera and microphone off, centered card,
   // typing bar) — the same path a camera failure mid-game already takes.
-  // A first version kept the camera view and just added the typing bar on
-  // top, which didn't read as a switch at all. The saved camera
-  // preference is untouched, so the next game starts in camera mode again.
+  // The saved camera preference is untouched, so the next game starts in
+  // camera mode again.
   function switchToTypingMode() {
-    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ nothing heard — switching to typing mode`);
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ switching to typing mode`);
     deactivateArMode(); // also clears every AR pause reason
     updatePauseState();
-    clearTimeout(toastTimer);
-    el.chainToast.textContent = "Mic not responding — type instead";
-    el.chainToast.classList.add("show");
-    toastTimer = setTimeout(() => el.chainToast.classList.remove("show"), SWITCH_TO_TYPING_TOAST_MS);
-    announce("Microphone isn't responding. Switched to typing.");
-    el.guessInput.focus();
   }
 
-  el.micRetryBtn.addEventListener("click", () => {
-    if (!voiceActive || !arModeActive) return;
-    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ mic retry tapped`);
-    clearPendingVoiceSubmit();
-    buildSlots(activeSecondWord, ""); // clear any half-heard letters from the deaf session
-    Voice.restart();
-    beginResumeSpeechCheck(); // timer stays paused until the new session hears the player
+  el.switchToTypingBtn.addEventListener("click", () => {
+    if (!arModeActive) return;
+    switchToTypingMode();
+    announce("Switched to typing.");
+    el.guessInput.focus(); // inside the tap, so iOS opens the keyboard
   });
 
   function handleVoiceListeningChange(isListening) {
@@ -1178,12 +1122,10 @@
     pausedByVoiceNotListening = !isListening;
     if (isListening) {
       voiceHeardThisSession = false;
-      armVoiceSilenceTimer(nextSilenceCheckMs);
-      nextSilenceCheckMs = SILENCE_NEW_SESSION_MS;
+      armVoiceSilenceTimer(SILENCE_NEW_SESSION_MS);
     } else {
       clearVoiceSilenceTimer();
     }
-    refreshVoiceHint();
     updatePauseState();
   }
 
@@ -1214,8 +1156,7 @@
     }
     pausedByVoiceNotListening = false;
     clearVoiceSilenceTimer();
-    pausedAwaitingSpeech = false;
-    refreshVoiceHint();
+    setSwitchToTypingOffered(false);
   }
 
   // checkGuess() is already case/space/hyphen-insensitive, so a recognized
@@ -1311,7 +1252,7 @@
   }
 
   function handleVoiceResult(rawTranscript, rawAlternatives) {
-    if (!voiceActive || el.guessInput.disabled || pausedByTabHidden) return; // ignore during a correct/wrong animation, or while the player is away
+    if (!voiceActive || el.guessInput.disabled) return; // ignore during a correct/wrong animation, or while the player is away
     noteVoiceHeard();
     const transcript = sanitizeVoiceTranscript(rawTranscript);
     if (!transcript) return; // nothing left after stripping (e.g. pure punctuation/noise)
@@ -1396,7 +1337,7 @@
   // voice responses felt slow and gave "no feedback on what is being
   // listened."
   function handleVoiceInterimResult(rawTranscript) {
-    if (!voiceActive || el.guessInput.disabled || pausedByTabHidden) return;
+    if (!voiceActive || el.guessInput.disabled) return;
     noteVoiceHeard();
     const transcript = sanitizeVoiceTranscript(rawTranscript);
     if (!transcript) return;
@@ -1409,7 +1350,7 @@
 
   function handleVoiceError(error) {
     console.error("Voice: recognition error", error);
-    if (document.hidden || pausedByTabHidden) return; // errors while away are expected; voice restarts on "Tap to resume"
+    if (document.hidden) return; // errors while leaving the app are expected; camera mode ends anyway
     if (error === "not-allowed" || error === "service-not-allowed") {
       stopVoiceInput();
       announce("Voice input unavailable. Check microphone permissions to continue.");
@@ -1419,57 +1360,35 @@
     // ui.js to do here.
   }
 
-  // Saves the camera/battery while the tab isn't visible, and pausing the
-  // timer meanwhile means the player doesn't lose time to it. When the tab
-  // comes back, the game waits on a "Tap to resume" button instead of
-  // restarting on its own: a real iPhone log showed the microphone session
-  // restarted automatically on return reporting itself as started but
-  // hearing nothing for ~40s (through a watchdog restart too) while the
-  // timer ran. Starting it from a tap alone didn't fix that (a second log),
-  // so the tap handler also starts the camera first and the microphone only
-  // after it settles; the tap itself keeps the timer paused until the
-  // player is ready. Falls back to non-AR play for the rest of the game
-  // if the camera won't restart.
+  // Leaving the app ends camera mode for the rest of this game. On iPhone,
+  // speech recognition never reliably came back after the page had been in
+  // the background (camera-first restarts, restart gaps, keeping the
+  // session alive and a microphone warm-up all failed on a real device), so
+  // the switch to typing happens the moment the page is hidden — while the
+  // player can't see the layout change — and they return to a "Paused"
+  // card explaining it. "Keep playing" resumes the timer and focuses the
+  // input inside the tap, which is what lets iOS open the keyboard.
+  // Applied on every device for consistency (Android is untested).
   document.addEventListener("visibilitychange", () => {
-    if (!arModeActive) return;
     if (document.hidden) {
+      if (!arModeActive) return;
       appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab hidden`);
-      pausedByTabHidden = true;
-      refreshVoiceHint(); // hides the mic retry button while away
-      updatePauseState();
-      clearTimeout(voiceSettleTimer);
-      voiceSettleTimer = null;
-      clearVoiceSilenceTimer();
+      pausedForResumeCard = true; // first, so the timer never runs between the switch and the pause
       clearPendingVoiceSubmit();
-      if (typeof Face !== "undefined") Face.stopCamera();
-      stopVoiceInput(); // restarted, after a microphone warm-up, on "Tap to resume"
-    } else {
-      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab visible again (waiting for tap)`);
-      el.resumeBtn.classList.remove("hidden");
+      switchToTypingMode();
+    } else if (pausedForResumeCard) {
+      appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab visible again — pause card`);
+      el.resumeCard.classList.remove("hidden");
       el.resumeBtn.focus();
     }
   });
 
-  el.resumeBtn.addEventListener("click", async () => {
-    el.resumeBtn.classList.add("hidden");
-    if (!arModeActive) return;
-    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ resume tapped`);
-    try {
-      if (typeof Face !== "undefined") await Face.startCamera(el.cameraVideo);
-    } catch {
-      pausedByTabHidden = false;
-      deactivateArMode();
-      return;
-    }
-    if (!arModeActive || document.hidden) return;
-    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ camera live`);
-    // Hand the pause over from "away" to "waiting to hear the player"
-    // before un-setting pausedByTabHidden, so the timer never ticks between.
-    pausedAwaitingSpeech = true;
-    pausedByTabHidden = false;
-    startVoiceInputAfterCameraSettles(beginResumeSpeechCheck);
-    refreshVoiceHint();
+  el.resumeBtn.addEventListener("click", () => {
+    el.resumeCard.classList.add("hidden");
+    pausedForResumeCard = false;
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ keep playing tapped`);
     updatePauseState();
+    el.guessInput.focus();
   });
 
   async function startWithCamera() {

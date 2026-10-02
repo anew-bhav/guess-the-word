@@ -70,8 +70,7 @@ const Voice = (() => {
   // Was 4000ms on the theory that iOS needs a few seconds to release the
   // microphone, but later iPhone logs showed restarts after a 4s gap going
   // silent too, while one 0.4s restart worked, so the length of the gap
-  // isn't what decides it. Kept short so recovering a silent session
-  // (ui.js's mic retry button and automatic check) is quick. start() waits
+  // isn't what decides it. start() waits
   // out the rest of this gap (onListeningChange stays false, so ui.js
   // keeps the timer paused meanwhile).
   const MIN_RESTART_GAP_MS = 1000;
@@ -394,14 +393,6 @@ const Voice = (() => {
     }
   }
 
-  // Tears down the current session and starts a new one after
-  // MIN_RESTART_GAP_MS — ui.js uses this when the player taps "Not hearing
-  // me?" or when a resumed session hears nothing at all.
-  function restart() {
-    if (!listening) return;
-    forceRestart();
-  }
-
   function stop() {
     emitDebugEvent("stop");
     emitListeningChange(false); // onend is nulled out below, so it won't emit this on its own
@@ -421,5 +412,5 @@ const Voice = (() => {
     }
   }
 
-  return { supported, start, stop, restart, warmUp, onResult, onInterimResult, onError, onListeningChange, onDebugEvent };
+  return { supported, start, stop, warmUp, onResult, onInterimResult, onError, onListeningChange, onDebugEvent };
 })();

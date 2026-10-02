@@ -57,19 +57,21 @@
     <div id="ar-layer" class="ar-layer hidden" aria-hidden="true">
       <video id="camera-video" class="camera-video" playsinline muted></video>
       <p id="move-into-frame-hint" class="move-into-frame hidden">Move into frame</p>
-      <p id="voice-reconnecting-hint" class="move-into-frame voice-reconnecting hidden" role="status">Reconnecting microphone…</p>
       <p id="model-load-progress" class="model-load-progress hidden" role="status"></p>
     </div>
 
-    <!-- Shown after the tab comes back from the background in AR mode. The
-         timer stays paused until it's tapped, and the camera/microphone
-         restart inside that tap — see the visibilitychange handler in ui.js. -->
-    <button id="resume-btn" class="btn btn-primary resume-btn hidden" type="button">Tap to resume</button>
+    <!-- Shown when the player comes back after leaving the app mid-camera-game.
+         The game has already switched to typing behind it; the timer stays
+         paused until "Keep playing" — see the visibilitychange handler in ui.js. -->
+    <div id="resume-card" class="resume-card hidden" role="dialog" aria-modal="true" aria-labelledby="resume-title" aria-describedby="resume-body">
+      <h2 id="resume-title" class="resume-title">Paused</h2>
+      <p id="resume-body" class="resume-body">Voice answers stop when you leave the app. You can keep playing by typing.</p>
+      <button id="resume-btn" class="btn btn-primary" type="button">Keep playing</button>
+    </div>
 
-    <!-- AR mode only: restarts the microphone on demand. iOS sometimes
-         leaves a session running but deaf, and the player notices first
-         (their words don't fill the slots). See ui.js. -->
-    <button id="mic-retry-btn" class="mic-retry-btn hidden" type="button">🎤 Not hearing me? Tap</button>
+    <!-- Camera mode only: offered after a stretch of silence, in case the
+         microphone isn't hearing the player. See ui.js. -->
+    <button id="switch-to-typing-btn" class="switch-typing-btn hidden" type="button">Switch to typing</button>
 
     <!-- HUD: timer + score stacked on the left, tries (lives) on the right.
          Same markup is shared by both the normal and AR screens. -->
@@ -121,6 +123,7 @@
           <span>Play in camera mode (AR)</span>
         </label>
         <p class="camera-privacy-note">Video is processed only on your device and is never uploaded.</p>
+        <p class="camera-privacy-note">Voice works best if you stay in the game — leaving the app switches you to typing.</p>
 
         <button id="play-btn" class="btn btn-primary" type="button">Play</button>
       </div>

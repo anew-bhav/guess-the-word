@@ -501,24 +501,44 @@ button {
   box-shadow: var(--shadow-sm);
 }
 
-/* Centered over the AR view while the game waits for a tap after the tab
-   returns from the background. */
-.resume-btn {
+/* Pause card shown when the player returns after leaving the app
+   mid-camera-game. The game has already switched to typing behind it. */
+.resume-card {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 20;
-  box-shadow: var(--shadow-md);
+  z-index: 30;
+  width: min(320px, calc(100% - 32px));
+  padding: 1.5rem 1.25rem 1.25rem;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  /* The first shadow is a page-wide scrim, so the card reads as a modal
+     over the paused board. */
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.35), var(--shadow-md);
+  text-align: center;
 }
 
-.resume-btn:active {
-  transform: translate(-50%, -50%) scale(0.97);
+.resume-title {
+  margin: 0 0 0.4rem;
+  font-size: 1.15rem;
+  color: var(--text-primary);
 }
 
-/* Small pill pinned near the bottom of the AR view, where the input bar
-   sits in typing mode. Large enough to tap, quiet enough to ignore. */
-.mic-retry-btn {
+.resume-body {
+  margin: 0 0 1.1rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.resume-card .btn {
+  width: 100%;
+}
+
+/* Quiet secondary pill near the bottom of the camera view, where the input
+   bar sits in typing mode — offered after a stretch of silence. */
+.switch-typing-btn {
   position: fixed;
   bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
   left: 50%;
@@ -537,21 +557,13 @@ button {
   transition: transform 0.15s var(--ease);
 }
 
-.mic-retry-btn:active {
+.switch-typing-btn:active {
   transform: translateX(-50%) scale(0.97);
 }
 
-.mic-retry-btn:focus-visible {
+.switch-typing-btn:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
-}
-
-/* Offset from the "move into frame" hint's position (above) — the two are
-   unrelated conditions (no face detected vs. the microphone reconnecting)
-   that could in principle both be true at once, so they shouldn't overlap. */
-.voice-reconnecting {
-  bottom: 32%;
-  color: var(--accent);
 }
 
 /* Small, non-blocking indicator while the face-tracking model downloads in
