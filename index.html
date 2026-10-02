@@ -71,7 +71,12 @@
 
     <!-- Camera mode only: offered after a stretch of silence, in case the
          microphone isn't hearing the player. See ui.js. -->
-    <button id="switch-to-typing-btn" class="switch-typing-btn hidden" type="button">Switch to typing</button>
+    <button id="switch-to-typing-btn" class="ar-pill-btn hidden" type="button">Switch to typing</button>
+
+    <!-- Camera mode only: shown while the microphone sleeps after a silent
+         stretch (it isn't restarted automatically, to avoid Chrome's
+         start sound on Android). See ui.js. -->
+    <button id="tap-to-speak-btn" class="ar-pill-btn hidden" type="button">🎤 Tap to speak</button>
 
     <!-- HUD: timer + score stacked on the left, tries (lives) on the right.
          Same markup is shared by both the normal and AR screens. -->

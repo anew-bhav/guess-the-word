@@ -536,9 +536,9 @@ button {
   width: 100%;
 }
 
-/* Quiet secondary pill near the bottom of the camera view, where the input
-   bar sits in typing mode — offered after a stretch of silence. */
-.switch-typing-btn {
+/* Quiet pill near the bottom of the camera view, where the input bar sits
+   in typing mode: "Switch to typing" and "Tap to speak" (never both). */
+.ar-pill-btn {
   position: fixed;
   bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
   left: 50%;
@@ -557,11 +557,11 @@ button {
   transition: transform 0.15s var(--ease);
 }
 
-.switch-typing-btn:active {
+.ar-pill-btn:active {
   transform: translateX(-50%) scale(0.97);
 }
 
-.switch-typing-btn:focus-visible {
+.ar-pill-btn:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
 }

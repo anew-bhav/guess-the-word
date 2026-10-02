@@ -65,6 +65,7 @@
     resumeCard: document.getElementById("resume-card"),
     resumeBtn: document.getElementById("resume-btn"),
     switchToTypingBtn: document.getElementById("switch-to-typing-btn"),
+    tapToSpeakBtn: document.getElementById("tap-to-speak-btn"),
     modelLoadProgress: document.getElementById("model-load-progress"),
     cameraToggleInput: document.getElementById("camera-toggle-input"),
     cameraStatusPanel: document.getElementById("camera-status-panel"),
@@ -265,6 +266,7 @@
     el.guessInput.value = "";
     el.guessInput.maxLength = activeSecondWord.length;
     if (!arModeActive) el.guessInput.focus();
+    if (voiceActive && micAsleep) Voice.start(); // a new word wakes the mic — its start sound doubles as a "speak now" cue
 
     if (showNewChainMessage) showChainToast();
   }
@@ -491,6 +493,8 @@
   let unsubscribeVoiceError = null;
   let unsubscribeVoiceDebug = null;
   let unsubscribeVoiceListening = null;
+  let unsubscribeVoiceSleep = null;
+  let micAsleep = false; // see handleVoiceSleepChange()
   let pendingVoiceParts = []; // transcript fragments collected since the last submit
   let voiceSubmitTimer = null;
   let voiceSettleTimer = null;
@@ -506,7 +510,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v25";
+  const BUILD_VERSION = "v26";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -1002,6 +1006,7 @@
     el.guessForm.classList.remove("hidden"); // restore typing for non-AR play
     voiceHeardThisSession = false;
     el.switchToTypingBtn.classList.add("hidden");
+    el.tapToSpeakBtn.classList.add("hidden");
     clearTimeout(voiceSettleTimer);
     voiceSettleTimer = null;
 
@@ -1041,6 +1046,7 @@
     unsubscribeVoiceInterim = Voice.onInterimResult(handleVoiceInterimResult);
     unsubscribeVoiceError = Voice.onError(handleVoiceError);
     unsubscribeVoiceListening = Voice.onListeningChange(handleVoiceListeningChange);
+    if (typeof Voice.onSleepChange === "function") unsubscribeVoiceSleep = Voice.onSleepChange(handleVoiceSleepChange);
     if (VOICE_DEBUG_ENABLED && typeof Voice.onDebugEvent === "function") {
       unsubscribeVoiceDebug = Voice.onDebugEvent(logVoiceDebugEvent);
     }
@@ -1115,6 +1121,29 @@
     el.guessInput.focus(); // inside the tap, so iOS opens the keyboard
   });
 
+  // The microphone sleeps after a silent session instead of restarting —
+  // see voice.js's onend (Chrome on Android clicks on every restart). While
+  // asleep, the timer runs (the player isn't blocked, just needs to tap)
+  // and "Tap to speak" replaces the silence-based "Switch to typing" offer,
+  // since an asleep mic isn't a broken one. A new word wakes it on its own
+  // (renderRound()).
+  function handleVoiceSleepChange(asleep) {
+    micAsleep = asleep;
+    appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ mic ${asleep ? "asleep (silent session)" : "awake"}`);
+    el.tapToSpeakBtn.classList.toggle("hidden", !(asleep && voiceActive && arModeActive));
+    if (asleep) {
+      pausedByVoiceNotListening = false;
+      clearVoiceSilenceTimer();
+      setSwitchToTypingOffered(false);
+      updatePauseState();
+    }
+  }
+
+  el.tapToSpeakBtn.addEventListener("click", () => {
+    if (!voiceActive || !micAsleep) return;
+    Voice.start();
+  });
+
   function handleVoiceListeningChange(isListening) {
     appendVoiceDebugLine(
       `+${voiceDebugElapsedSeconds()}s  ◇ listening: ${isListening} ${isListening ? "(timer resumed)" : "(timer paused)"}`
@@ -1152,6 +1181,12 @@
       unsubscribeVoiceListening();
       unsubscribeVoiceListening = null;
     }
+    if (unsubscribeVoiceSleep) {
+      unsubscribeVoiceSleep();
+      unsubscribeVoiceSleep = null;
+    }
+    micAsleep = false;
+    el.tapToSpeakBtn.classList.add("hidden");
     if (unsubscribeVoiceDebug) {
       unsubscribeVoiceDebug();
       unsubscribeVoiceDebug = null;

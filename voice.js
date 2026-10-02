@@ -86,6 +86,9 @@ const Voice = (() => {
   let watchdogId = null;
   let lastStoppedAt = 0;
   let delayedStartTimer = null;
+  let sessionHadSpeech = false; // the current session heard speech (speechstart or any transcript)
+  let asleep = false; // a session ended in silence and wasn't restarted — see onend
+  let sleepChangeCallbacks = [];
   let sessionId = 0; // bumped on every (re)start, so a stale restart timer can't act on a session that's already gone
 
   function supported() {
@@ -196,6 +199,7 @@ const Voice = (() => {
 
   function createAndStart() {
     const mySession = ++sessionId;
+    sessionHadSpeech = false;
     noteActivity();
 
     recognition = new RecognitionCtor();
@@ -227,6 +231,7 @@ const Voice = (() => {
     // a final transcript lands) isn't the "hung and dead" case the watchdog
     // is for. Not every engine fires both; either is enough to count.
     recognition.onspeechstart = () => {
+      sessionHadSpeech = true;
       noteActivity();
       emitDebugEvent("speechstart");
     };
@@ -244,6 +249,7 @@ const Voice = (() => {
     recognition.onaudioend = () => emitDebugEvent("audioend");
 
     recognition.onresult = (event) => {
+      sessionHadSpeech = true;
       noteActivity();
       const last = event.results[event.results.length - 1];
       if (!last) return;
@@ -273,9 +279,19 @@ const Voice = (() => {
     // restart automatically as long as we still intend to be listening.
     // stop() clears `listening` first, so an intentional stop never
     // triggers a restart here.
+    //
+    // Except a session that ended without hearing any speech: it goes to
+    // sleep instead of restarting. Chrome on Android plays its start sound
+    // on every (re)start and ends sessions after ~5s of silence, so
+    // restarting those produced constant clicking (reported as
+    // "disturbing"). ui.js wakes it with start() on a new word or a tap.
     recognition.onend = () => {
       emitDebugEvent("end", { session: mySession });
       emitListeningChange(false);
+      if (listening && mySession === sessionId && !sessionHadSpeech) {
+        goToSleep();
+        return;
+      }
       if (listening && mySession === sessionId) {
         emitDebugEvent("auto-restart");
         try {
@@ -343,12 +359,43 @@ const Voice = (() => {
     }
   }
 
+  function goToSleep() {
+    emitDebugEvent("sleep");
+    listening = false;
+    stopWatchdog();
+    recognition = null;
+    setAsleep(true);
+  }
+
+  function setAsleep(next) {
+    if (asleep === next) return;
+    asleep = next;
+    sleepChangeCallbacks.forEach((cb) => {
+      try {
+        cb(asleep);
+      } catch (err) {
+        console.error("Voice: onSleepChange callback threw", err);
+      }
+    });
+  }
+
+  // true when a session ended in silence and is waiting for start() — see
+  // onend. ui.js shows a "Tap to speak" button meanwhile.
+  function onSleepChange(callback) {
+    sleepChangeCallbacks.push(callback);
+    return () => {
+      sleepChangeCallbacks = sleepChangeCallbacks.filter((cb) => cb !== callback);
+    };
+  }
+
   function start() {
     if (!supported()) {
       emitError("unsupported");
       return;
     }
     if (listening) return; // already running
+    if (asleep) emitDebugEvent("wake");
+    setAsleep(false);
 
     listening = true;
     const wait = MIN_RESTART_GAP_MS - (Date.now() - lastStoppedAt);
@@ -395,6 +442,7 @@ const Voice = (() => {
 
   function stop() {
     emitDebugEvent("stop");
+    setAsleep(false);
     emitListeningChange(false); // onend is nulled out below, so it won't emit this on its own
     listening = false;
     stopWatchdog();
@@ -412,5 +460,5 @@ const Voice = (() => {
     }
   }
 
-  return { supported, start, stop, warmUp, onResult, onInterimResult, onError, onListeningChange, onDebugEvent };
+  return { supported, start, stop, warmUp, onResult, onInterimResult, onError, onListeningChange, onSleepChange, onDebugEvent };
 })();
