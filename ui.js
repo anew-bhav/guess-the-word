@@ -511,7 +511,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v30";
+  const BUILD_VERSION = "v31";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -602,8 +602,10 @@
     const title = document.createElement("span");
     // Read directly (not RESUME_TEST, which is declared further down and not
     // yet initialized when the panel is built at page load).
-    const resumeTestOn = new URLSearchParams(location.search).has("resumetest");
-    title.textContent = `voice debug · ${BUILD_VERSION}${resumeTestOn ? " · resume test" : ""}`;
+    const debugParams = new URLSearchParams(location.search);
+    const resumeTestOn = debugParams.has("resumetest") || debugParams.has("vosk");
+    const voskLabel = debugParams.has("vosk") ? ` · vosk${debugParams.get("vosk") === "grammar" ? " (grammar)" : ""}` : "";
+    title.textContent = `voice debug · ${BUILD_VERSION}${voskLabel}${resumeTestOn ? " · resume test" : ""}`;
     header.appendChild(title);
 
     voiceDebugCopyBtn = document.createElement("button");
@@ -1571,7 +1573,10 @@
   // The v27 diagnostic showed the mic and recognizer both work after a
   // switch, so this checks whether the old camera restart was what
   // silenced voice. Regular players keep the switch-to-typing behavior.
-  const RESUME_TEST = new URLSearchParams(location.search).has("resumetest");
+  // Also on with ?vosk: the on-device recognizer is expected to survive an
+  // app switch, so the switch keeps camera mode and restarts voice the
+  // same way.
+  const RESUME_TEST = new URLSearchParams(location.search).has("resumetest") || new URLSearchParams(location.search).has("vosk");
   let resumeTestPending = false; // camera mode kept across a switch; voice restarts on "Keep playing"
 
   function logCameraState(when) {
@@ -1596,7 +1601,7 @@
     if (RESUME_TEST && !document.hidden && resumeTestPending) {
       appendVoiceDebugLine(`+${voiceDebugElapsedSeconds()}s  ◇ tab visible again — pause card (resume test)`);
       logCameraState("on return");
-      el.resumeBody.textContent = "Resume test: voice restarts when you continue. The camera was left running.";
+      el.resumeBody.textContent = "Voice restarts when you continue.";
       el.resumeCard.classList.remove("hidden");
       el.resumeBtn.focus();
       return;
@@ -1623,6 +1628,7 @@
       if (arModeActive) {
         logCameraState("at tap");
         if (el.cameraVideo.paused) el.cameraVideo.play().catch(() => {}); // in case iOS paused the element
+        if (typeof Voice.prime === "function") Voice.prime(); // ?vosk: resume the AudioContext inside the tap
         startVoiceInput(); // inside the tap; no camera restart, no warm-up
         updatePauseState();
         return;
@@ -1670,6 +1676,9 @@
   }
 
   function startNewGame() {
+    // The on-device recognizer prototype (?vosk) needs its AudioContext
+    // started inside this tap on iOS; the browser recognizer doesn't.
+    if (cameraEnabled && typeof Voice !== "undefined" && typeof Voice.prime === "function") Voice.prime();
     if (cameraEnabled) startWithCamera();
     else beginRound();
   }

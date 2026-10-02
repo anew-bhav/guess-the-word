@@ -54,7 +54,10 @@
  * and restarts the recognizer if that gap gets too long — independent of
  * whether the dead session ever reports its own death.
  */
-const Voice = (() => {
+// voice-vosk.js defines window.VoiceVosk when the URL has ?vosk (an
+// on-device recognizer prototype with the same interface); otherwise this
+// browser SpeechRecognition wrapper is used.
+const Voice = window.VoiceVosk || (() => {
   const RecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
   const WATCHDOG_CHECK_MS = 2000;
   // Every (re)start of the recognizer plays an audible system sound in
