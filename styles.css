@@ -585,11 +585,21 @@ button {
   line-height: 1.4;
   text-align: center;
   box-shadow: var(--shadow-md);
-  animation: hint-pop 0.25s ease;
+  animation: ar-hint-in 0.25s ease;
 }
 
-.voice-load-progress {
-  top: 3rem; /* below the face-tracking progress note, in case both show */
+/* Uses the standalone translate property, not transform: the caption is
+   centered with transform: translateX(-50%), which a transform animation
+   would replace for its duration (the caption would jump). */
+@keyframes ar-hint-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
 }
 
 .model-load-progress {
@@ -608,6 +618,10 @@ button {
   letter-spacing: 0.03em;
 }
 
+.voice-load-progress {
+  top: 3rem; /* below the face-tracking progress note, in case both show */
+}
+
 /* The HUD previously got a translucent, blurred backing in AR mode (to stay
    legible over the live camera feed) — removed per feedback: the HUD now
    floats directly over the video with no panel behind it at all, leaving
@@ -615,21 +629,31 @@ button {
    was dead code by this point anyway — the input bar is always hidden in
    AR mode now, see activateArMode() in ui.js.) */
 
-/* Removing the HUD's background panel (above) left its text/ring/swatches
-   blending into whatever the camera happens to show behind them. A
-   drop-shadow halo — tinted with --surface, so it's a light glow in light
-   mode and a dark glow in dark mode — keeps every HUD element legible
-   against arbitrary video content without reintroducing any panel; unlike
-   a background, filter: drop-shadow() reaches every child (text, the SVG
-   timer ring, the swatches) at once. Kept deliberately light (one halo
-   layer, low blur, low opacity) — just enough for contrast, not a heavy
-   glow of its own. The HUD's own border-bottom (meant to separate it from
-   the board on an opaque screen) is also dropped here — floating alone
-   over the live video with nothing else around it, it just read as a
-   stray line rather than a separator. */
+/* Over the live camera feed the HUD has no opaque screen behind it, and the
+   video can be any brightness — independent of the app's light/dark theme —
+   so text, ring and swatches that look fine on one background vanish on
+   another (reported on light backgrounds). Two compact "chips" (timer +
+   score, and tries) each carry their own mostly-opaque, blurred backing in
+   the theme's surface colour, so the theme's text colours always sit on the
+   surface colour they were designed for, whatever the video shows. A full
+   width bar was removed earlier for eating into the room the word card
+   needs; chips only cover the elements themselves. The HUD's own
+   border-bottom is dropped too — it separates the HUD from the board on an
+   opaque screen, and floating over video it just reads as a stray line. */
 #game-screen.ar-active .hud {
   border-bottom: none;
-  filter: drop-shadow(0 0 2px var(--surface)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+  align-items: flex-start;
+  padding: 0.6rem 0.75rem;
+}
+
+#game-screen.ar-active .hud-left,
+#game-screen.ar-active .hud-tries {
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-sm);
 }
 
 #game-screen.ar-active .board {
@@ -645,7 +669,7 @@ button {
 }
 
 .word-card.faded {
-  opacity: 0.55;
+  opacity: 0.72; /* still readable over a bright camera feed — it was 0.55 */
 }
 
 /* ---------- Board / word card ---------- */
