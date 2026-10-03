@@ -107,6 +107,17 @@
     });
   }
 
+  // Terms whose answer word, and whole term, aren't in the Vosk model's
+  // vocabulary, so they can never be recognized — the grammar silently
+  // drops unknown words ("Ignoring word missing in vocabulary" in the
+  // worker's console). ui.js keeps them out of games played by voice.
+  // Found by checking every non-AI term against that warning list with the
+  // vosk-model-small-en-us-0.15 model (3 of 676); re-check if the model or
+  // the dataset changes: start a camera game with a console attached to the
+  // worker, collect the warnings, and flag terms whose `second` AND every
+  // word of `term` are in that list.
+  const UNANSWERABLE_TERMS = ["glassmorphism", "optical kerning", "dogfooding"];
+
   // "idle" | "loading" | "ready" | "failed", plus a 0–1 download fraction.
   let modelState = "idle";
   let modelFraction = 0;
@@ -362,6 +373,7 @@
     start,
     stop,
     prime,
+    unanswerableTerms: () => UNANSWERABLE_TERMS.slice(),
     // Starts the model download early (ui.js calls this once camera mode is
     // on) so it's ready, or at least progressing, by the time Play is pressed.
     preload: () => {

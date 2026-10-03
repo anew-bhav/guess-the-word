@@ -322,6 +322,18 @@
   });
 
   // ---------- Hint ----------
+  // The hint is the term's definition, but in about 1 of 5 terms the
+  // definition contains the answer word itself ("Bar containing primary
+  // navigation links" for NAV + BAR), which hands the answer over. Those
+  // words are blanked out. Answers of one or two letters ("in", "up") are
+  // left alone: they're ordinary words that would turn the sentence into
+  // gibberish, and revealing them gives little away.
+  function hintTextFor(term) {
+    const answer = term.second;
+    if (answer.length < 3) return term.definition;
+    return term.definition.replace(new RegExp(`\\b${answer}(?:s|es)?\\b`, "gi"), "____");
+  }
+
   // In camera mode the answer is spoken, so there's nothing to tap: once
   // HINT_REVEAL_SECONDS remain, the hint is shown automatically in a
   // caption (#ar-hint). It counts as using the hint, exactly like tapping
@@ -333,9 +345,9 @@
     if (arHintShown || !activeTerm) return;
     arHintShown = true;
     Game.useHint();
-    el.arHint.textContent = activeTerm.definition;
+    el.arHint.textContent = hintTextFor(activeTerm);
     el.arHint.classList.remove("hidden");
-    announce("Hint: " + activeTerm.definition);
+    announce("Hint: " + hintTextFor(activeTerm));
   }
 
   function hideArHint() {
@@ -352,7 +364,7 @@
   el.hintBtn.addEventListener("click", () => {
     if (el.hintText.classList.contains("hidden")) {
       Game.useHint();
-      el.hintText.textContent = activeTerm ? activeTerm.definition : "";
+      el.hintText.textContent = activeTerm ? hintTextFor(activeTerm) : "";
       el.hintText.classList.remove("hidden");
       announce("Hint: " + el.hintText.textContent);
     } else {
@@ -605,7 +617,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v33";
+  const BUILD_VERSION = "v34";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -1110,7 +1122,7 @@
     refreshVoiceLoadUi();
     if (arHintShown && activeTerm) {
       // Switching to typing mid-round: keep the hint on screen, in the card.
-      el.hintText.textContent = activeTerm.definition;
+      el.hintText.textContent = hintTextFor(activeTerm);
       el.hintText.classList.remove("hidden");
       el.hintBtn.classList.remove("hidden");
     }
@@ -1641,7 +1653,9 @@
   function beginRound() {
     switchScreen("game");
     showPlayingBoard();
-    Game.start();
+    // Terms the voice engine can't recognize would be unanswerable by voice,
+    // so camera-mode games skip them.
+    Game.start({ skipTerms: cameraEnabled ? Voice.unanswerableTerms() : [] });
   }
 
   function startNewGame() {

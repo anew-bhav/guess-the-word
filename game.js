@@ -247,9 +247,13 @@ const Game = (() => {
     });
   }
 
-  function start() {
+  // options.skipTerms: term strings this game must never pick (they go
+  // into usedTerms, which the picker already avoids). ui.js uses it for
+  // terms the current voice engine can't recognize — see voice-vosk.js.
+  function start(options = {}) {
     stopTimer();
     state = newGameState();
+    (options.skipTerms || []).forEach((term) => state.usedTerms.add(term));
     const recentStarts = loadRecentStarts();
     recentStarts.forEach((term) => state.usedTerms.add(term));
     pendingNextMainWord = null;

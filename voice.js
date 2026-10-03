@@ -516,6 +516,8 @@ const Voice = (() => {
     // switching to typing when the app is left.
     survivesAppSwitch: () => active === vosk,
     engine: () => (active === vosk ? "vosk" : "browser"),
+    // Terms this engine can't recognize (the browser recognizer has no such gap).
+    unanswerableTerms: () => (active === vosk ? vosk.unanswerableTerms() : []),
     start: () => active.start(),
     stop: () => {
       BuiltinVoice.stop();

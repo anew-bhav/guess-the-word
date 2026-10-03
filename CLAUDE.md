@@ -139,14 +139,14 @@ Update this section at the end of each phase.
 
 **Current phase:** 4 (complete, awaiting "next phase")
 
-**TODO (backlog, added 2026-10-02, not started):**
+**TODO batch (added 2026-10-02) — all six done on branch `todo-batch`, see the notes at the bottom of this file:**
 
-1. AR mode: auto-show the hint after 15 seconds if the word isn't solved (currently only the "i" button appears at 15s; in AR mode the player can't easily tap it).
-2. AR mode UI: fonts and other UI elements are hard to read when the camera background is light.
-3. The "Layers" terminology (score label, from the Phase 2 design-tool theme) is confusing; rename or rethink.
-4. Score needs attribution to increase distribution (wording as given; likely means a shareable result that credits/links the game so it spreads; clarify before building).
-5. Review the word dataset (`design-terms.js`).
-6. Typing mode UX improvements when the on-screen keyboard is open.
+1. ~~AR mode: auto-show the hint after 15 seconds~~ — done.
+2. ~~AR mode UI readable on light camera backgrounds~~ — done.
+3. ~~"Layers" terminology~~ — renamed to "Score".
+4. ~~Score attribution / distribution~~ — done as a share sheet + link (see notes).
+5. ~~Review the word dataset~~ — reviewed; fixes applied in code, data untouched (see notes).
+6. ~~Typing mode UX with the keyboard open~~ — done.
 
 **Notes / known issues:**
 
@@ -443,3 +443,11 @@ Both refuse while a camera game's voice is running. Test plan on iPhone: run bot
 - **Removed:** the `?resumetest` flag and `logCameraState()`, the Level test / Speech test / Cam + speech test buttons and their functions, and `?vosk`-flag gating. The debug panel (`?debugvoice`), Hard refresh and Copy log stay. **Kept on purpose:** the browser recognizer's mic-sleep ("Tap to speak"), watchdog and restart-gap code, since the fallback still uses them.
 - **Verified (headless Chrome, fake mic/camera):** default start with no flags (engine vosk, grammar true, audiostart); leave/return/"Keep playing" (camera mode kept, voice restarted, typing bar hidden); model fetch failure → falls back to the browser recognizer with the timer running; offline after first use. Real-device recheck of the final build still to do.
 - Files: `models/vosk-model-small-en-us-0.15.tar.gz` stays gitignored (see the rebuild command in the Vosk prototype note above); `vendor/vosk.js` is committed.
+
+**TODO batch notes (v34, branch `todo-batch`).**
+- **#1 AR hint:** in camera mode the hint appears automatically once 15s remain (`showArHint()` in `ui.js`, caption `#ar-hint` outside the scaled card). It counts as using the hint (next round = leftover + 10s, capped at 30), same as tapping the "i". The "i" button is not shown in camera mode. If the game switches to typing mid-round, the shown hint moves into the card. Typing mode is unchanged.
+- **#2 AR readability:** the camera-mode HUD sits on two compact blurred "chips" (timer+score, tries) in the theme's surface colour (`#game-screen.ar-active .hud-left/.hud-tries`) instead of a drop-shadow halo, because the video's brightness is independent of the app theme. The faded "no face" card is 0.72 opacity (was 0.55). Fixed a CSS ordering bug where `.voice-load-progress` was overridden by `.model-load-progress`. Verified with screenshots over a bright background in light and dark themes.
+- **#3:** the HUD label "Layers" is now "Score" (the Phase 2 brief text above was amended).
+- **#4 attribution:** interpreted as "every shared score should carry the game's name and a link". "Copy result" became "Share result" (`#share-result-btn`): the phone's share sheet where available (link passed separately), otherwise the text is copied. Text: "Design Chain 🔗 — I scored N! / Best: M / ✅✅❌ / Can you beat it? <link>". The link is `origin + pathname` without query/hash (`gameShareUrl()`). Added a meta description and basic Open Graph tags. **Not done:** `og:image` (needs an absolute URL for the final domain) and a "beat my score" challenge link.
+- **#5 dataset review (902 terms, 676 playable non-AI).** Structure is clean: no missing fields, duplicate terms or pairs, odd characters, case issues, or profanity; ranks 1–902 are consistent; every `term` equals first + second. Findings and actions: (a) in 126 of 676 playable terms the definition (= the hint) contains the answer word, e.g. NAV+BAR → "Bar containing primary navigation links". **Fix:** `hintTextFor()` in `ui.js` blanks the answer word ("____") at display time (answers of 1–2 letters are left alone); the dataset text is untouched, and the game-over list still shows full definitions. (b) Voice can't answer 3 terms: Vosk's model doesn't know their answer word, so `glassmorphism`, `optical kerning` and `dogfooding` are skipped in camera-mode games (`Game.start({ skipTerms })`, list in `voice-vosk.js` `UNANSWERABLE_TERMS`, with instructions to regenerate it). Found by capturing the worker's "Ignoring word missing in vocabulary" warnings over CDP (49 grammar words are unknown to the model, but only those 3 terms depend on one). **Not changed, for the owner to decide:** the hard pool is thin (258 easy / 315 moderate / 103 hard playable), "dog + fooding" is a stretch as a connecting word (it only works because the whole term is accepted too), and definitions have no end punctuation (consistent, so left alone).
+- **#6 typing + keyboard:** the guess input is locked with `readOnly` instead of `disabled` between a guess and the next round (a disabled input lost focus and closed the phone keyboard after every word); taps on the card no longer blur the input and a tap on the board refocuses it; while the keyboard is up (`html.kb-open`, from `visualViewport`) the game screen is pinned to the visible area above the keyboard with a compact layout (no app bar, one-row HUD, tighter padding), which fits on a small phone (verified at 420px of visible height); `enterkeyhint="go"`. Headless-verified focus through wrong and correct answers. **Needs a real-phone check:** the iOS keyboard behavior itself can't be reproduced headlessly (the keyboard was simulated by shrinking `visualViewport`).
