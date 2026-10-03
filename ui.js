@@ -70,6 +70,8 @@
     modelLoadProgress: document.getElementById("model-load-progress"),
     voiceLoadProgress: document.getElementById("voice-load-progress"),
     arHint: document.getElementById("ar-hint"),
+    nearMiss: document.getElementById("near-miss"),
+    arNearMiss: document.getElementById("ar-near-miss"),
     cameraToggleInput: document.getElementById("camera-toggle-input"),
     cameraStatusPanel: document.getElementById("camera-status-panel"),
     cameraStatusMessage: document.getElementById("camera-status-message"),
@@ -265,6 +267,7 @@
     el.hintBtn.classList.add("hidden");
     hideHintText();
     hideArHint();
+    hideNearMiss();
 
     el.guessInput.readOnly = false;
     el.guessInput.value = "";
@@ -383,6 +386,7 @@
   // ---------- Input handling ----------
   // Feedback fires the instant every slot is filled — no need to press Enter.
   el.guessInput.addEventListener("input", () => {
+    hideNearMiss(); // typing again — the message has done its job
     buildSlots(activeSecondWord, el.guessInput.value);
     if (activeSecondWord && el.guessInput.value.length === activeSecondWord.length) {
       submitCurrentGuess();
@@ -401,7 +405,66 @@
     if (!result) return;
 
     if (result.result === "correct") handleCorrectFeedback(result);
-    else handleWrongFeedback(result);
+    else handleWrongFeedback(result, value);
+  }
+
+  // ---------- Near-miss feedback ----------
+  // A wrong guess still costs a try — nothing here changes scoring — but
+  // when it was nearly right the player is told so ("Very close!") instead
+  // of only seeing red, which also softens a voice misrecognition that was
+  // a letter or two off.
+  const NEAR_MISS_MS = 2200;
+  let nearMissTimer = null;
+
+  // Letter-level edit distance between two short lowercase words. Swapping
+  // two neighbouring letters ("chrat" for "chart"), the commonest typing
+  // slip, counts as one mistake, not two.
+  function editDistance(a, b) {
+    const rows = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= b.length; j++) rows[0][j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        rows[i][j] = Math.min(rows[i - 1][j] + 1, rows[i][j - 1] + 1, rows[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+          rows[i][j] = Math.min(rows[i][j], rows[i - 2][j - 2] + 1);
+        }
+      }
+    }
+    return rows[a.length][b.length];
+  }
+
+  // "very-close", "warm" or null. Answers of one or two letters never get a
+  // message (nearly everything is "close" to them); a one-letter slip only
+  // counts as very close for answers of four letters or more.
+  function closenessOf(guess, answer) {
+    const a = answer.toLowerCase();
+    const g = guess.toLowerCase().replace(/[^a-z]/g, "");
+    if (a.length <= 2 || !g || g === a) return null;
+    const similarity = 1 - editDistance(g, a) / Math.max(g.length, a.length);
+    if (similarity >= 0.75 && a.length >= 4) return "very-close";
+    if (similarity >= 0.5) return "warm";
+    return null;
+  }
+
+  function nearMissFor(rawGuess) {
+    if (!activeTerm) return null;
+    const connecting = extractConnectingWordGuess(rawGuess, activeTerm.first, activeSecondWord);
+    return closenessOf(connecting, activeSecondWord);
+  }
+
+  function showNearMiss(kind) {
+    const target = arModeActive ? el.arNearMiss : el.nearMiss;
+    target.textContent = kind === "very-close" ? "Very close!" : "Getting warm";
+    target.classList.toggle("very-close", kind === "very-close");
+    target.classList.remove("hidden");
+    clearTimeout(nearMissTimer);
+    nearMissTimer = setTimeout(hideNearMiss, NEAR_MISS_MS);
+  }
+
+  function hideNearMiss() {
+    clearTimeout(nearMissTimer);
+    el.nearMiss.classList.add("hidden");
+    el.arNearMiss.classList.add("hidden");
   }
 
   function handleCorrectFeedback(result) {
@@ -429,8 +492,9 @@
     }, CORRECT_SLOT_REVEAL_MS + CORRECT_ANIM_MS);
   }
 
-  function handleWrongFeedback(result) {
+  function handleWrongFeedback(result, guessText) {
     updateHud(result.state);
+    const nearMiss = result.state.over ? null : nearMissFor(guessText || "");
     el.wordCard.classList.remove("correct");
     // Restart the shake animation even if it's still mid-play from a fast retry.
     el.wordCard.classList.remove("wrong");
@@ -442,7 +506,9 @@
       return; // the 'gameover' listener below takes over from here
     }
 
-    announce(`Wrong. ${result.state.tries} ${result.state.tries === 1 ? "try" : "tries"} left.`);
+    if (nearMiss) showNearMiss(nearMiss);
+    const nearMissWords = nearMiss === "very-close" ? " Very close." : nearMiss === "warm" ? " Getting warm." : "";
+    announce(`Wrong.${nearMissWords} ${result.state.tries} ${result.state.tries === 1 ? "try" : "tries"} left.`);
     el.guessInput.value = "";
     el.guessInput.readOnly = true;
     buildSlots(activeSecondWord, "");
@@ -617,7 +683,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v38";
+  const BUILD_VERSION = "v39";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
