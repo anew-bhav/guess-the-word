@@ -29,7 +29,7 @@
     (function () {
       var theme = "light";
       try {
-        var saved = localStorage.getItem("designChainTheme");
+        var saved = localStorage.getItem("guessTheWordTheme");
         if (saved === "light" || saved === "dark") {
           theme = saved;
         } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {

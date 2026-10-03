@@ -115,7 +115,7 @@
   // index.html's inline <head> script already resolved data-theme to "light"
   // or "dark" (saved choice, else system preference) before first paint —
   // this just keeps the button's icon in sync and handles clicks.
-  const THEME_KEY = "designChainTheme";
+  const THEME_KEY = "guessTheWordTheme";
 
   function saveTheme(theme) {
     try {
@@ -543,7 +543,7 @@
   // no game rule changes. If face.js fails to load, or the camera/model
   // can't start, startWithCamera()'s catch falls back to the exact same
   // non-AR flow as if the toggle had been off the whole time.
-  const CAMERA_KEY = "designChainCameraEnabled";
+  const CAMERA_KEY = "guessTheWordCameraEnabled";
   const LERP_FACTOR = 0.15; // card-follow smoothing per animation frame (lowered from 0.25 — see POSITION_DEADZONE_PX below)
   const POSITION_DEADZONE_PX = 5; // ignore face-position changes smaller than this — frame-to-frame detector noise, not real head movement
   const NO_FACE_PAUSE_MS = 3000; // pause the timer once no face has been seen this long
@@ -617,7 +617,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v35";
+  const BUILD_VERSION = "v36";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source

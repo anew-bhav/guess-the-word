@@ -15,8 +15,8 @@
  * stuck on stale cached files indefinitely, since cache-first never asks
  * the network to check for changes on its own.
  */
-const CACHE_VERSION = "v35";
-const CACHE_NAME = `design-chain-${CACHE_VERSION}`;
+const CACHE_VERSION = "v36";
+const CACHE_NAME = `guess-the-word-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
   "./",
@@ -70,7 +70,8 @@ self.addEventListener("activate", (event) => {
       const cacheNames = await caches.keys();
       await Promise.all(
         cacheNames
-          .filter((name) => name.startsWith("design-chain-") && name !== CACHE_NAME)
+          // Also clears caches left by the game's earlier name ("design-chain-")
+          .filter((name) => (name.startsWith("guess-the-word-") || name.startsWith("design-chain-")) && name !== CACHE_NAME)
           .map((name) => caches.delete(name))
       );
       await self.clients.claim(); // control already-open tabs too, not just future ones

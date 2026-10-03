@@ -56,8 +56,8 @@ const Game = (() => {
   const TIME_BONUS_SECONDS = 10; // added to the leftover time when the hint was used
   const MAX_TRIES = 3;
   const TICK_MS = 100;
-  const BEST_SCORE_KEY = "designChainBestScore";
-  const RECENT_STARTS_KEY = "designChainRecentStarts";
+  const BEST_SCORE_KEY = "guessTheWordBestScore";
+  const RECENT_STARTS_KEY = "guessTheWordRecentStarts";
   const RECENT_STARTS_LIMIT = 30; // don't repeat an opening word within this many games
 
   // AI-category terms are kept out of the game entirely: pre-marking them as
