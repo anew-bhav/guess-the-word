@@ -50,7 +50,7 @@
     finalScore: document.getElementById("final-score"),
     finalBest: document.getElementById("final-best"),
     playAgainBtn: document.getElementById("play-again-btn"),
-    copyResultBtn: document.getElementById("copy-result-btn"),
+    shareResultBtn: document.getElementById("share-result-btn"),
     copyConfirm: document.getElementById("copy-confirm"),
     termsCount: document.getElementById("terms-count"),
     termsList: document.getElementById("terms-list"),
@@ -426,14 +426,21 @@
     el.termsCount.textContent = `${items.length} ${items.length === 1 ? "term" : "terms"}`;
   }
 
-  function buildResultSummary(state, bestScore) {
-    const checks = state.history.map(() => "✅").join("");
-    const miss = state.missedTerm ? "❌" : "";
-    return (
-      `Design Chain 🔗\n` +
-      `Score: ${state.score} • Best: ${bestScore}\n` +
-      `${checks}${miss}`
-    );
+  // The link people land on from a shared result: this page without any
+  // query string, hash or index.html (so a shared debug/test URL never
+  // leaks into it).
+  function gameShareUrl() {
+    return location.origin + location.pathname.replace(/index\.html$/, "");
+  }
+
+  // The shared text names the game and carries the link, so every shared
+  // score doubles as an invitation to play.
+  function buildResultSummary(state, bestScore, includeUrl = true) {
+    const marks = state.history.map(() => "✅").join("") + (state.missedTerm ? "❌" : "");
+    const lines = [`Design Chain 🔗 — I scored ${state.score}!`, `Best: ${bestScore}`];
+    if (marks) lines.push(marks);
+    if (includeUrl) lines.push("", `Can you beat it? ${gameShareUrl()}`);
+    return lines.join("\n");
   }
 
   function showGameOverScreen(state, bestScore) {
@@ -445,13 +452,29 @@
     switchScreen("gameover");
   }
 
-  el.copyResultBtn.addEventListener("click", async () => {
+  // Uses the phone's share sheet where there is one (the link is passed
+  // separately, so the text doesn't repeat it); otherwise copies the text
+  // with the link to the clipboard.
+  el.shareResultBtn.addEventListener("click", async () => {
     const state = Game.getState();
     const bestScore = Game.getBestScore();
-    const text = buildResultSummary(state, bestScore);
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Design Chain",
+          text: buildResultSummary(state, bestScore, false),
+          url: gameShareUrl(),
+        });
+        el.copyConfirm.textContent = "";
+        return;
+      } catch (err) {
+        if (err && err.name === "AbortError") return; // closed the share sheet — nothing to report
+        // Any other share failure: fall through to copying.
+      }
+    }
     try {
-      await navigator.clipboard.writeText(text);
-      el.copyConfirm.textContent = "Copied to clipboard!";
+      await navigator.clipboard.writeText(buildResultSummary(state, bestScore));
+      el.copyConfirm.textContent = "Copied — paste it anywhere to challenge a friend!";
     } catch {
       el.copyConfirm.textContent = "Couldn't copy automatically — select and copy the result manually.";
     }
