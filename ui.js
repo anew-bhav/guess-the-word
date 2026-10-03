@@ -234,17 +234,52 @@
   }
 
   // ---------- Word card ----------
+  // ---------- Letter reveal ----------
+  // With LETTER_REVEAL_SECONDS left, one letter of the answer is shown in
+  // its slot, for the rest of the round. It's deliberately a *random* later
+  // letter: never the first (already shown) and never the very next one,
+  // which would just hand over the obvious start of the word. Answers of
+  // one or two letters have nothing to reveal. Scoring is unchanged.
+  const LETTER_REVEAL_SECONDS = 8;
+  let revealedSlot = null; // index of the revealed slot this round, or null
+  let revealJustHappened = false; // lets that slot pop once when it appears
+  let currentSlotText = ""; // what the slots were last built with, to rebuild after a reveal
+
+  function revealIndexFor(wordLength) {
+    if (wordLength < 3) return null;
+    return 2 + Math.floor(Math.random() * (wordLength - 2)); // 2 .. wordLength - 1
+  }
+
+  function maybeRevealLetter() {
+    if (revealedSlot !== null || !activeSecondWord) return;
+    const index = revealIndexFor(activeSecondWord.length);
+    if (index === null) return;
+    revealedSlot = index;
+    revealJustHappened = true;
+    buildSlots(activeSecondWord, currentSlotText);
+    announce(`Hint: letter ${index + 1} is ${activeSecondWord[index].toUpperCase()}.`);
+  }
+
   function buildSlots(secondWord, typedValue) {
+    currentSlotText = typedValue;
     el.guessSlots.innerHTML = "";
     for (let i = 0; i < secondWord.length; i++) {
       const slot = document.createElement("span");
       const isFirst = i === 0;
       const typedChar = typedValue[i];
-      const char = isFirst ? secondWord[0] : typedChar;
+      const isRevealed = i === revealedSlot && !typedChar; // a typed or spoken letter takes over its slot
+      const char = isFirst ? secondWord[0] : typedChar || (isRevealed ? secondWord[i] : "");
 
       slot.className = "slot";
       if (isFirst) slot.classList.add("locked", "filled");
       else if (typedChar) slot.classList.add("filled");
+      else if (isRevealed) {
+        slot.classList.add("revealed");
+        if (revealJustHappened) {
+          slot.classList.add("just-revealed");
+          revealJustHappened = false;
+        }
+      }
 
       slot.textContent = char ? char.toUpperCase() : "";
       el.guessSlots.appendChild(slot);
@@ -262,6 +297,8 @@
     el.wordCard.classList.remove("correct", "wrong");
     el.mainWord.textContent = term.first.toUpperCase();
     el.cardMerged.textContent = "";
+    revealedSlot = null; // a new round: nothing revealed yet
+    revealJustHappened = false;
     buildSlots(activeSecondWord, "");
 
     el.hintBtn.classList.add("hidden");
@@ -683,7 +720,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v39";
+  const BUILD_VERSION = "v40";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -1751,6 +1788,7 @@
 
   Game.on("tick", (payload) => {
     setTimerRing(payload.timeRemaining);
+    if (payload.timeRemaining <= LETTER_REVEAL_SECONDS) maybeRevealLetter();
     if (payload.timeRemaining <= HINT_REVEAL_SECONDS) {
       if (arModeActive) showArHint();
       else el.hintBtn.classList.remove("hidden");

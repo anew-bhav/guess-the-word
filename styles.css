@@ -893,6 +893,14 @@ button {
   border-color: var(--text-tertiary);
   color: var(--text-secondary);
 }
+/* The letter given away when the time is nearly up. */
+.slot.revealed {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+.slot.just-revealed {
+  animation: slot-pop 0.3s ease;
+}
 
 @keyframes slot-pop {
   0% { transform: scale(1.3); }
