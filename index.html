@@ -59,6 +59,10 @@
       <p id="move-into-frame-hint" class="move-into-frame hidden">Move into frame</p>
       <p id="model-load-progress" class="model-load-progress hidden" role="status"></p>
       <p id="voice-load-progress" class="model-load-progress voice-load-progress hidden" role="status"></p>
+      <!-- Camera mode only: the hint shows by itself once half the time is gone
+           (the player is speaking, so can't tap the "i"). A caption outside the
+           word card, since the card is scaled down and moves with the face. -->
+      <p id="ar-hint" class="ar-hint hidden"></p>
     </div>
 
     <!-- Shown when the player comes back after leaving the app mid-camera-game.

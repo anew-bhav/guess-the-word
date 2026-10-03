@@ -69,6 +69,7 @@
     tapToSpeakBtn: document.getElementById("tap-to-speak-btn"),
     modelLoadProgress: document.getElementById("model-load-progress"),
     voiceLoadProgress: document.getElementById("voice-load-progress"),
+    arHint: document.getElementById("ar-hint"),
     cameraToggleInput: document.getElementById("camera-toggle-input"),
     cameraStatusPanel: document.getElementById("camera-status-panel"),
     cameraStatusMessage: document.getElementById("camera-status-message"),
@@ -263,6 +264,7 @@
 
     el.hintBtn.classList.add("hidden");
     hideHintText();
+    hideArHint();
 
     el.guessInput.disabled = false;
     el.guessInput.value = "";
@@ -274,6 +276,28 @@
   }
 
   // ---------- Hint ----------
+  // In camera mode the answer is spoken, so there's nothing to tap: once
+  // HINT_REVEAL_SECONDS remain, the hint is shown automatically in a
+  // caption (#ar-hint). It counts as using the hint, exactly like tapping
+  // the "i" does (the next round gets this round's leftover time + the
+  // bonus instead of a fresh full timer). Typing mode is unchanged.
+  let arHintShown = false;
+
+  function showArHint() {
+    if (arHintShown || !activeTerm) return;
+    arHintShown = true;
+    Game.useHint();
+    el.arHint.textContent = activeTerm.definition;
+    el.arHint.classList.remove("hidden");
+    announce("Hint: " + activeTerm.definition);
+  }
+
+  function hideArHint() {
+    arHintShown = false;
+    el.arHint.classList.add("hidden");
+    el.arHint.textContent = "";
+  }
+
   function hideHintText() {
     el.hintText.classList.add("hidden");
     el.hintText.textContent = "";
@@ -1015,6 +1039,13 @@
     if (!arModeActive) return;
     arModeActive = false;
     refreshVoiceLoadUi();
+    if (arHintShown && activeTerm) {
+      // Switching to typing mid-round: keep the hint on screen, in the card.
+      el.hintText.textContent = activeTerm.definition;
+      el.hintText.classList.remove("hidden");
+      el.hintBtn.classList.remove("hidden");
+    }
+    hideArHint();
     if (arRafId) {
       cancelAnimationFrame(arRafId);
       arRafId = null;
@@ -1565,7 +1596,8 @@
   Game.on("tick", (payload) => {
     setTimerRing(payload.timeRemaining);
     if (payload.timeRemaining <= HINT_REVEAL_SECONDS) {
-      el.hintBtn.classList.remove("hidden");
+      if (arModeActive) showArHint();
+      else el.hintBtn.classList.remove("hidden");
     }
   });
 
