@@ -11,6 +11,7 @@
   const WRONG_ANIM_MS = 400;
   const GAMEOVER_DELAY_MS = 900;
   const CHAIN_TOAST_MS = 1200;
+  const LEVEL_TOAST_MS = 2400; // a level-up notice stays a little longer than "New chain!"
   const HINT_REVEAL_SECONDS = 15;
 
   const TIMER_RADIUS = 26;
@@ -286,7 +287,7 @@
     }
   }
 
-  function renderRound(term, showNewChainMessage) {
+  function renderRound(term, showNewChainMessage, levelUp, level) {
     activeSecondWord = term.second;
     previousTerm = activeTerm;
     activeTerm = term;
@@ -312,7 +313,9 @@
     if (!arModeActive) el.guessInput.focus();
     if (voiceActive && micAsleep) Voice.start(); // a new word wakes the mic — its start sound doubles as a "speak now" cue
 
-    if (showNewChainMessage) showChainToast();
+    // A level-up takes the toast; it matters more than a new chain.
+    if (levelUp) showToast(`Level ${level} — longer words ahead!`, undefined, LEVEL_TOAST_MS);
+    else if (showNewChainMessage) showChainToast();
   }
 
   // ---------- On-screen keyboard (typing mode) ----------
@@ -414,10 +417,16 @@
   });
 
   function showChainToast() {
+    showToast("New chain!", "New chain! " + activeSecondWord.charAt(0).toUpperCase() + " blank.");
+  }
+
+  // The little pill above the card: "New chain!" or a level-up notice.
+  function showToast(text, announcement, durationMs = CHAIN_TOAST_MS) {
     clearTimeout(toastTimer);
+    el.chainToast.textContent = text;
     el.chainToast.classList.add("show");
-    announce("New chain! " + activeSecondWord.charAt(0).toUpperCase() + " blank.");
-    toastTimer = setTimeout(() => el.chainToast.classList.remove("show"), CHAIN_TOAST_MS);
+    announce(announcement || text);
+    toastTimer = setTimeout(() => el.chainToast.classList.remove("show"), durationMs);
   }
 
   // ---------- Input handling ----------
@@ -720,7 +729,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v40";
+  const BUILD_VERSION = "v41";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -1781,7 +1790,7 @@
 
   // ---------- Game event wiring ----------
   Game.on("round", (payload) => {
-    renderRound(payload.term, payload.showNewChainMessage);
+    renderRound(payload.term, payload.showNewChainMessage, payload.levelUp, payload.level);
     updateHud(payload.state);
     setTimerRing(payload.state.timeRemaining);
   });
