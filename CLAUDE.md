@@ -82,7 +82,7 @@ Build the complete playable game with the word card centered on screen.
 Restyle the game to look like a design tool canvas:
 
 - Word card looks like a selected text layer: dashed blue outline, small square corner handles, and a tiny dimension tag below (e.g. "240 × 96").
-- HUD styled like a design tool toolbar: score labeled "Layers", chain length labeled "Chain", tries shown as 3 small color swatches that turn grey when lost, timer as a circular progress ring.
+- HUD styled like a design tool toolbar: score labeled "Score" (originally "Layers" — renamed because it was confusing), chain length labeled "Chain", tries shown as 3 small color swatches that turn grey when lost, timer as a circular progress ring.
 - Timer ring changes smoothly from accent blue → amber → red in the last 10 seconds, with a gentle pulse in the last 5.
 - Game over screen looks like an exported artboard.
 - Palette: neutral canvas greys, one selection blue as accent, soft green and soft red for feedback (not harsh neon).
