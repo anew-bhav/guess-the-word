@@ -1,5 +1,5 @@
 /**
- * Design Chain — voice input for AR mode.
+ * Guess the Word — voice input for AR mode.
  *
  * Small, self-contained interface mirroring face.js's shape: supported(),
  * start(), stop(), onResult(callback), onError(callback). Nothing else in

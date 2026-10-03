@@ -1,5 +1,5 @@
 /**
- * Design Chain — service worker (Phase 4: offline support).
+ * Guess the Word — service worker (Phase 4: offline support).
  *
  * Cache-first: on install, precaches every game file, the self-hosted
  * MediaPipe vendor files, and the face model, so the whole game (including
@@ -15,7 +15,7 @@
  * stuck on stale cached files indefinitely, since cache-first never asks
  * the network to check for changes on its own.
  */
-const CACHE_VERSION = "v34";
+const CACHE_VERSION = "v35";
 const CACHE_NAME = `design-chain-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [

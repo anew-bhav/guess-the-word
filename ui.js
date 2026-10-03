@@ -1,5 +1,5 @@
 /**
- * Design Chain — rendering & animations.
+ * Guess the Word — rendering & animations.
  *
  * Owns all DOM interaction. Listens to Game's events and updates the
  * screen; forwards user input (typing, submitting, button clicks) to Game.
@@ -495,7 +495,7 @@
   // score doubles as an invitation to play.
   function buildResultSummary(state, bestScore, includeUrl = true) {
     const marks = state.history.map(() => "✅").join("") + (state.missedTerm ? "❌" : "");
-    const lines = [`Design Chain 🔗 — I scored ${state.score}!`, `Best: ${bestScore}`];
+    const lines = [`Guess the Word 🔗 — I scored ${state.score}!`, `Best: ${bestScore}`];
     if (marks) lines.push(marks);
     if (includeUrl) lines.push("", `Can you beat it? ${gameShareUrl()}`);
     return lines.join("\n");
@@ -519,7 +519,7 @@
     if (navigator.share) {
       try {
         await navigator.share({
-          title: "Design Chain",
+          title: "Guess the Word",
           text: buildResultSummary(state, bestScore, false),
           url: gameShareUrl(),
         });
@@ -617,7 +617,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v34";
+  const BUILD_VERSION = "v35";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -638,7 +638,7 @@
   // prepended once per copy, not stored per line.
   function buildVoiceDebugHeader() {
     return [
-      "Design Chain voice debug log",
+      "Guess the Word voice debug log",
       `Build: ${BUILD_VERSION}`,
       `Captured: ${new Date().toISOString()}`,
       `User agent: ${navigator.userAgent}`,

@@ -1,5 +1,5 @@
 /**
- * Design Chain — on-device speech recognition (Vosk).
+ * Guess the Word — on-device speech recognition (Vosk).
  *
  * The default voice engine in camera mode where the browser supports it.
  * Defines window.VoiceVosk, which voice.js combines with the browser's

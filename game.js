@@ -1,5 +1,5 @@
 /**
- * Design Chain — game state & logic.
+ * Guess the Word — game state & logic.
  *
  * Owns all game state and rules. Knows nothing about the DOM. Relies on
  * the globals exposed by design-terms.js (CHAIN, CONTINUABLE, pick,
