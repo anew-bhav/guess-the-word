@@ -1137,3 +1137,70 @@ button {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- On-screen keyboard (typing mode) ----------
+   ui.js adds html.kb-open while the input has focus and the visual
+   viewport has shrunk by a keyboard, and keeps --vv-height / --vv-top at the
+   visible area's size and offset. The game screen is pinned to exactly that
+   area, so nothing hides behind the keyboard or scrolls away, and the
+   layout tightens (no app bar, a one-row HUD, less padding) so the HUD,
+   the word card and the input all fit above the keyboard even on a small
+   phone (about 400px of visible height on an iPhone SE). */
+html.kb-open,
+html.kb-open body {
+  overflow: hidden;
+}
+
+html.kb-open .app-bar {
+  display: none;
+}
+
+html.kb-open #game-screen {
+  position: fixed;
+  top: var(--vv-top, 0px);
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: var(--vv-height, 100dvh);
+  min-height: 0;
+}
+
+html.kb-open .hud {
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: 0.4rem 1rem;
+}
+
+html.kb-open .hud-left {
+  flex-direction: row;
+  gap: 0.9rem;
+}
+
+html.kb-open .hud-timer,
+html.kb-open .timer-ring {
+  width: 40px;
+  height: 40px;
+}
+
+html.kb-open .hud-tries {
+  flex-direction: row;
+  gap: 0.35rem;
+}
+
+html.kb-open .board {
+  padding: 0.5rem 1rem;
+  min-height: 0;
+}
+
+html.kb-open .word-card {
+  padding: 1.25rem 1.5rem;
+}
+
+html.kb-open .card-main-word {
+  margin-top: 0;
+}
+
+html.kb-open .input-bar {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}

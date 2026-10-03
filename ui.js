@@ -266,7 +266,7 @@
     hideHintText();
     hideArHint();
 
-    el.guessInput.disabled = false;
+    el.guessInput.readOnly = false;
     el.guessInput.value = "";
     el.guessInput.maxLength = activeSecondWord.length;
     if (!arModeActive) el.guessInput.focus();
@@ -274,6 +274,52 @@
 
     if (showNewChainMessage) showChainToast();
   }
+
+  // ---------- On-screen keyboard (typing mode) ----------
+  // The input is locked with readOnly, never disabled, between a guess and
+  // the next round: a disabled input loses focus, which closes the phone's
+  // keyboard, and it can't be reopened without a tap — so the keyboard used
+  // to drop after every word.
+  //
+  // While the keyboard is up, the page tracks the visible area above it
+  // (visualViewport) and switches to a compact layout (html.kb-open in
+  // styles.css) so the HUD, the card and the input all fit above the
+  // keyboard even on a small phone. iOS and Chrome on Android both shrink
+  // the visual viewport (not the layout viewport) when the keyboard opens.
+  const KEYBOARD_MIN_HEIGHT_PX = 120; // a smaller shrink is browser chrome, not a keyboard
+  const viewport = window.visualViewport;
+
+  function updateKeyboardLayout() {
+    if (!viewport) return;
+    const root = document.documentElement;
+    const keyboardOpen =
+      document.activeElement === el.guessInput && window.innerHeight - viewport.height > KEYBOARD_MIN_HEIGHT_PX;
+    root.classList.toggle("kb-open", keyboardOpen);
+    if (keyboardOpen) {
+      root.style.setProperty("--vv-height", `${viewport.height}px`);
+      root.style.setProperty("--vv-top", `${viewport.offsetTop}px`);
+    }
+  }
+
+  if (viewport) {
+    viewport.addEventListener("resize", updateKeyboardLayout);
+    viewport.addEventListener("scroll", updateKeyboardLayout);
+  }
+  el.guessInput.addEventListener("focus", updateKeyboardLayout);
+  el.guessInput.addEventListener("blur", () => setTimeout(updateKeyboardLayout, 0));
+
+  // Tapping the card or the empty space around it blurs the input on a
+  // phone and drops the keyboard. Keep focus on the input for those taps
+  // (the hint button still works: this only stops the focus change).
+  document.querySelector(".board").addEventListener("mousedown", (e) => {
+    if (!arModeActive && document.activeElement === el.guessInput) e.preventDefault();
+  });
+  // …and if the keyboard was dismissed anyway, a tap on the board brings it back.
+  document.querySelector(".board").addEventListener("click", () => {
+    if (!arModeActive && !el.guessInput.readOnly && document.activeElement !== el.guessInput && !el.guessForm.classList.contains("hidden")) {
+      el.guessInput.focus();
+    }
+  });
 
   // ---------- Hint ----------
   // In camera mode the answer is spoken, so there's nothing to tap: once
@@ -312,7 +358,7 @@
     } else {
       hideHintText();
     }
-    if (!el.guessInput.disabled) el.guessInput.focus();
+    if (!el.guessInput.readOnly) el.guessInput.focus();
   });
 
   function showChainToast() {
@@ -348,7 +394,7 @@
 
   function handleCorrectFeedback(result) {
     updateHud(result.state);
-    el.guessInput.disabled = true;
+    el.guessInput.readOnly = true;
     announce(`Correct! ${result.term.term}. Plus ${result.points} points.`);
 
     // The slots are already showing the complete, correct word at this
@@ -386,12 +432,12 @@
 
     announce(`Wrong. ${result.state.tries} ${result.state.tries === 1 ? "try" : "tries"} left.`);
     el.guessInput.value = "";
-    el.guessInput.disabled = true;
+    el.guessInput.readOnly = true;
     buildSlots(activeSecondWord, "");
     clearTimeout(wrongResetTimer);
     wrongResetTimer = setTimeout(() => {
       el.wordCard.classList.remove("wrong");
-      el.guessInput.disabled = false;
+      el.guessInput.readOnly = false;
       el.guessInput.focus();
     }, WRONG_ANIM_MS);
   }
@@ -1384,7 +1430,7 @@
   }
 
   function handleVoiceResult(rawTranscript, rawAlternatives) {
-    if (!voiceActive || el.guessInput.disabled) return; // ignore during a correct/wrong animation, or while the player is away
+    if (!voiceActive || el.guessInput.readOnly) return; // ignore during a correct/wrong animation, or while the player is away
     noteVoiceHeard();
     const transcript = sanitizeVoiceTranscript(rawTranscript);
     if (!transcript) return; // nothing left after stripping (e.g. pure punctuation/noise)
@@ -1469,7 +1515,7 @@
   // voice responses felt slow and gave "no feedback on what is being
   // listened."
   function handleVoiceInterimResult(rawTranscript) {
-    if (!voiceActive || el.guessInput.disabled) return;
+    if (!voiceActive || el.guessInput.readOnly) return;
     noteVoiceHeard();
     const transcript = sanitizeVoiceTranscript(rawTranscript);
     if (!transcript) return;
@@ -1631,7 +1677,8 @@
       el.wordCard.classList.add("wrong");
       announce("Time's up! Game over.");
     }
-    el.guessInput.disabled = true;
+    el.guessInput.readOnly = true;
+    el.guessInput.blur(); // closes the keyboard — the game-over screen has no input
     deactivateArMode(); // stop the camera stream on game over, per the brief
     setTimeout(() => {
       showGameOverScreen(payload.state, payload.bestScore);
