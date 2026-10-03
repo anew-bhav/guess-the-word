@@ -617,7 +617,7 @@
   const VOICE_DEBUG_ENABLED = new URLSearchParams(location.search).has("debugvoice");
   // Shown in the copied debug log so a pasted log says which code ran.
   // Keep in sync with CACHE_VERSION in sw.js.
-  const BUILD_VERSION = "v37";
+  const BUILD_VERSION = "v38";
   const VOICE_DEBUG_VISIBLE_LINES = 60; // how many lines the on-screen panel shows at once
   const VOICE_DEBUG_LOG_CAP = 1000; // how many lines "Copy" can pull from — far more than fits on screen
   const voiceDebugStartTime = performance.now(); // single shared clock for every line, regardless of source
@@ -1391,12 +1391,19 @@
   // the *last* occurrence, so a repeated attempt run together into one
   // transcript ("full lead full bleed") previews just the latest one
   // ("bleed").
-  function extractConnectingWordGuess(heard, mainWord) {
+  function extractConnectingWordGuess(heard, mainWord, answer) {
     const normalizedHeard = heard.toLowerCase().replace(/[\s-]+/g, "");
     const normalizedMain = (mainWord || "").toLowerCase();
     const cut = normalizedMain ? normalizedHeard.lastIndexOf(normalizedMain) : -1;
-    if (cut >= 0 && normalizedHeard.length > cut + normalizedMain.length) {
-      return normalizedHeard.slice(cut + normalizedMain.length);
+    // Strip the main word even when nothing follows it yet. Saying a whole
+    // term ("liquid glass") delivers "liquid" first, and returning that
+    // as-is filled the slots for GLASS with the letters of LIQUID until the
+    // second word arrived — confusing, since it looked like a wrong guess.
+    if (cut >= 0) return normalizedHeard.slice(cut + normalizedMain.length);
+    // Likewise a partial main word still being recognized ("liq"), unless
+    // it could just as well be the start of the answer.
+    if (normalizedHeard && normalizedMain.startsWith(normalizedHeard) && !(answer || "").toLowerCase().startsWith(normalizedHeard)) {
+      return "";
     }
     return normalizedHeard;
   }
@@ -1485,7 +1492,7 @@
     // since it already strips whitespace/hyphens and checks both the
     // connecting word and the complete term on its own.
     const heardSoFar = pendingVoiceParts.join("");
-    const slotGuess = extractConnectingWordGuess(heardSoFar, activeTerm && activeTerm.first);
+    const slotGuess = extractConnectingWordGuess(heardSoFar, activeTerm && activeTerm.first, activeSecondWord);
     buildSlots(activeSecondWord, slotGuess);
 
     // Test this fragment alone first, before waiting on the debounce at
@@ -1534,7 +1541,7 @@
     const preview = pendingVoiceParts.join("") + transcript;
     const matched = findAcceptedVoiceGuess([preview]);
     if (matched) interimMatchedGuess = matched; // kept until this utterance's final result — see handleVoiceResult()
-    const slotGuess = extractConnectingWordGuess(preview, activeTerm && activeTerm.first);
+    const slotGuess = extractConnectingWordGuess(preview, activeTerm && activeTerm.first, activeSecondWord);
     buildSlots(activeSecondWord, slotGuess);
   }
 
